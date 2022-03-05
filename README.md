@@ -9,6 +9,11 @@ A utility to monitor network performance
 ### Server Side
 * Copy `server/index.html` to `/var/www/html/ping/index.html` on the server
 * Configure nginx by copying `server/ping.conf` to `/etc/nginx/conf.d/ping.conf`
+* Test the config
+  * `ping -c 4 ping.projects.chrisjeakle.com`
+  * Ensure there's no redirects: `curl -H 'Cache-Control: no-cache' http://ping.projects.chrisjeakle.com/ -I -k`
+  * `curl http://ping.projects.chrisjeakle.com/`
+  * Visit in a browser: http://ping.projects.chrisjeakle.com/
 
 ### Client Side
 * Configure the application by editing `client/config.rs`
