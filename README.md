@@ -1,41 +1,20 @@
 # Network Monitor
-
 A utility to monitor network performance
 
 ## Build
-
 `rustfmt client.rs && rustc client.rs`
 
 ## Deploy
 
 ### Server Side
-* Copy `server-files/index.html` into `/var/www/html/network-monitor/` on the server
-* Configure nginx to serve that file: `/etc/nginx/conf.d/network-monitor.conf`
-```
-server {
-    listen 80;
-    server_name ping.projects.chrisjeakle.com;
-    root /var/www/html/network-monitor;
-    index index.html;
-}
-```
+* Copy `server/index.html` to `/var/www/html/ping/index.html` on the server
+* Configure nginx by copying `server/ping.conf` to `/etc/nginx/conf.d/ping.conf`
 
 ### Client Side
-* Create a service: `/etc/systemd/system/network-monitor.service`
-```
-[Unit]
-Description=Network Monitor Client
-
-[Service]
-Type=simple
-Restart=always
-User=network-monitor
-Group=network-monitor
-WorkingDirectory=/usr/bin/network-monitor
-ExecStart=/usr/bin/network-monitor/client
-
-[Install]
-WantedBy=multi-user.target
-```
+* Configure the application by editing `client/config.rs`
+* Build
+* Copy the client binary to `/usr/bin/network-monitor/client` on the client device
+* Create a service to auto-start the client
+  * Copy `client/network-monitor.service` to `/etc/systemd/system/network-monitor.service` on the client device
 * View the logging via a browser
   * http://localhost:8080

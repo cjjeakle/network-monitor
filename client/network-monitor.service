@@ -1,0 +1,13 @@
+[Unit]
+Description=Network Monitor Client
+
+[Service]
+Type=simple
+Restart=always
+User=network-monitor
+Group=network-monitor
+WorkingDirectory=/usr/bin/network-monitor
+ExecStart=/usr/bin/network-monitor/client
+
+[Install]
+WantedBy=multi-user.target
