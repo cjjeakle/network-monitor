@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Ping test.</title>
+  </head>
+  <body>
+      <p>The ping took: <span id="result"></span> ms.</p>
+      <button onclick="javascript:ping_test();">Test again</button>
+  </body>
+  <script>
+  function ping_test() {
+    let request = new XMLHttpRequest();
+    let start_time = new Date();
+    request.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+          let elapsed_time = new Date() - start_time;
+          // Typical action to be performed when the document is ready:
+          document.getElementById("result").innerText = elapsed_time;
+        }
+    };
+    request.open("GET", "ping/index.html", true);
+    request.setRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
+    request.send();
+  }
+  ping_test();
+  </script>
+</html>

@@ -10,13 +10,16 @@ rustfmt client.rs && rustc client.rs
 ## Deploy
 
 ### Server Side
-* Copy `server/index.html` to `/var/www/html/ping/index.html` on the server
-* Configure nginx by copying `server/ping.conf` to `/etc/nginx/conf.d/ping.conf`
-* `service nginx reload`
+* Set up the web pages:
+  * On the server: `ssh root@projects.chrisjeakle.com 'mkdir /var/www/html/ping/'`
+  * `scp -pr /server/html root@projects.chrisjeakle.com:/var/www/html/ping/` on the server
+* Configure nginx:
+  * `scp server/nginx/ping.conf root@projects.chrisjeakle.com:/etc/nginx/conf.d/ping.conf`
+  * On the server: `ssh root@projects.chrisjeakle.com 'service nginx reload'`
 * Test the config
   * `ping -c 4 ping.projects.chrisjeakle.com`
-  * Ensure there's no redirects: `curl -H 'Cache-Control: no-cache' http://ping.projects.chrisjeakle.com/ -I -k`
-  * `curl http://ping.projects.chrisjeakle.com/`
+  * Ensure there's no redirects: `curl -H 'Cache-Control: no-cache' http://ping.projects.chrisjeakle.com/ping/ -I -k`
+  * `curl http://ping.projects.chrisjeakle.com/ping/`
   * Visit in a browser: http://ping.projects.chrisjeakle.com/
 
 ### Client Side
