@@ -26,4 +26,4 @@ rustfmt client.rs && rustc client.rs
 * Create a service to auto-start the client
   * Copy `client/network-monitor.service` to `/etc/systemd/system/network-monitor.service` on the client device
 * View the logging via a browser
-  * http://localhost:8080
+  * http://localhost:8180
