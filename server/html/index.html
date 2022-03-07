@@ -2,27 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=400">
     <title>Ping test.</title>
   </head>
   <body>
-      <p>The ping took: <span id="result"></span> ms.</p>
+      <p>The ping took: <var id="result"></var> ms.</p>
+      <p><em>Note: this site times a full HTTP request, there's some overhead included in the ping time.</em></p>
       <button onclick="javascript:ping_test();">Test again</button>
   </body>
+  <style>
+    body {
+      min-height: 100vh;
+      max-width: 400px;
+      margin: 2 auto;
+    }
+  </style>
   <script>
-  function ping_test() {
-    let request = new XMLHttpRequest();
-    let start_time = new Date();
-    request.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-          let elapsed_time = new Date() - start_time;
-          // Typical action to be performed when the document is ready:
+    function ping_test() {
+      const start_time = new Date().getTime();
+      fetch("ping/index.html", {
+          mode: "no-cors",
+          cache: "no-cache",
+        }).then(async (result) => {
+          const elapsed_time = new Date().getTime() - start_time;
           document.getElementById("result").innerText = elapsed_time;
-        }
-    };
-    request.open("GET", "ping/index.html", true);
-    request.setRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
-    request.send();
-  }
-  ping_test();
+      });
+    }
+    setTimeout(ping_test, 250);
   </script>
 </html>
