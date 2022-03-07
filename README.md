@@ -4,7 +4,7 @@ A utility to monitor network performance
 ## Build
 ```
 cd client
-rustfmt client.rs && rustc client.rs
+cargo build
 ```
 
 ## Deploy
