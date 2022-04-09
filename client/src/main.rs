@@ -34,7 +34,7 @@ static mut PINGS: Mutex<PingData> = Mutex::new(PingData{
 async fn main() -> std::io::Result<()> {
     thread::spawn(repeatedly_ping);
     return HttpServer::new(|| App::new().service(index))
-        .bind(("127.0.0.1", config::WEB_PORT))?
+        .bind(("127.0.0.1", config::WEB_UI_PORT))?
         .run()
         .await
 }

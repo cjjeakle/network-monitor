@@ -2,10 +2,13 @@
 A utility to monitor network performance
 
 ## Build
-```
-cd client
-cargo build
-```
+* [Install `rustup`](https://www.rust-lang.org/tools/install)
+* Update (`rustup update`)
+* Build the client:
+  ```
+  cd client
+  cargo build
+  ```
 
 ## Deploy
 
@@ -27,6 +30,6 @@ cargo build
 * Build the client
 * Copy the client binary to `/usr/bin/network-monitor/client` on the client device
 * Create a service to auto-start the client
-  * Copy `client/network-monitor.service` to `/etc/systemd/system/network-monitor.service` on the client device
+  * Copy `client/systemd/network-monitor.service` to `/etc/systemd/system/network-monitor.service` on the client device
 * View the logging via a browser
   * http://localhost:8180
