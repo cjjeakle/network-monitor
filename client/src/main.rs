@@ -1,8 +1,7 @@
 #![feature(map_first_last)]
-use actix_web::{get, web, App, HttpServer, Responder};
+use actix_web::{web, App, HttpServer, Responder};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Utc};
-use reqwest;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -52,11 +51,7 @@ fn repeatedly_ping(ping_data: Arc<Mutex<PingData>>) {
         let ping_data_write_clone = Arc::clone(&ping_data);
         thread::spawn(move || {
             let start_time: DateTime<Utc> = Utc::now();
-            let body = reqwest::blocking::get(config::PING_DESTINATION)
-                .unwrap()
-                .text()
-                .unwrap();
-            println!("response body = {:?}", body);
+            let reponse = ureq::get(config::PING_DESTINATION).call().unwrap();
             let how_long = Utc::now() - start_time;
             ping_data_write_clone
                 .lock()
