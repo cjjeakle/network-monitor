@@ -7,7 +7,7 @@ A utility to monitor network performance
 * Build the client:
   ```
   cd client
-  cargo build
+  cargo fmt && cargo build
   ```
 
 ## Deploy

@@ -1,12 +1,11 @@
 #![feature(map_first_last)]
-use std::collections::BTreeMap;
-use chrono::{DateTime, Utc};
-use chrono::Duration as chrono_Duration;
-use std::time::Duration;
-use std::sync::{Mutex};
-use std::thread;
 use actix_web::{get, web, App, HttpServer, Responder};
-
+use chrono::Duration as chrono_Duration;
+use chrono::{DateTime, Utc};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 mod config;
 
@@ -14,50 +13,60 @@ struct PingData {
     data: BTreeMap<DateTime<Utc>, Duration>,
 }
 impl PingData {
-    fn AddEntry(&mut self, when: DateTime<Utc>, how_long: Duration) {
+    fn add_entry(&mut self, when: DateTime<Utc>, how_long: Duration) {
         if self.data.len() >= config::MAX_ENTRIES_SAVED {
-            self.data.pop_first();  // Drop the oldest entry
+            self.data.pop_first(); // Drop the oldest entry
         }
         self.data.insert(when, how_long);
     }
-    fn ForEach(self, callback: fn(&DateTime<Utc>, &Duration)) {
+    fn for_each(self, callback: fn(&DateTime<Utc>, &Duration)) {
         for (when, how_long) in self.data {
             callback(&when, &how_long);
         }
     }
 }
-static mut PINGS: Mutex<PingData> = Mutex::new(PingData{
-    data: BTreeMap::new()
-});
 
 #[actix_web::main] // or #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    thread::spawn(repeatedly_ping);
-    return HttpServer::new(|| App::new().service(index))
-        .bind(("127.0.0.1", config::WEB_UI_PORT))?
-        .run()
-        .await
+    let ping_data = Arc::new(Mutex::new(PingData {
+        data: BTreeMap::new(),
+    }));
+    let ping_data_write_clone = Arc::clone(&ping_data);
+    thread::spawn(move || repeatedly_ping(ping_data_write_clone));
+    let ping_data_read_clone = web::Data::new(Arc::clone(&ping_data));
+    return HttpServer::new(move || {
+        App::new()
+            .app_data(ping_data_read_clone.clone())
+            .route("/", web::get().to(index))
+    })
+    .bind(("127.0.0.1", config::WEB_UI_PORT))?
+    .run()
+    .await;
 }
 
-fn repeatedly_ping() {
+// Pings the destination URI.
+fn repeatedly_ping(ping_data: Arc<Mutex<PingData>>) {
     loop {
-        let start_time: DateTime<Utc> = Utc::now();
-        let how_long = Duration::from_millis(10);  // TODO: IMPLEMENT <=====================
-        // Kick off a worker thread to lock and update the map.
-        thread::spawn(|| {
-            let locked_data = PINGS.lock().unwrap();
-            locked_data.AddEntry(start_time, how_long);
+        // Kick off a worker thread to perform a ping and append the result to `PingData`.
+        let ping_data_write_clone = Arc::clone(&ping_data);
+        thread::spawn(move || {
+            let start_time: DateTime<Utc> = Utc::now();
+            let how_long = Duration::from_millis(10); // TODO: IMPLEMENT <=====================
+            ping_data_write_clone
+                .lock()
+                .unwrap()
+                .add_entry(start_time, how_long);
         });
-        // Wait for the ping interval to elapse.
-        let next_ping_time = start_time + chrono_Duration::seconds(config::SEC_BETWEEN_PINGS as i64);
-        let cur_time = Utc::now();
-        if cur_time < next_ping_time {
-            thread::sleep((next_ping_time - cur_time).to_std().unwrap());
-        }
+        // Wait for the ping interval to elapse and repeat.
+        thread::sleep(
+            chrono_Duration::seconds(config::SEC_BETWEEN_PINGS as i64)
+                .to_std()
+                .unwrap(),
+        );
     }
 }
 
-#[get("/index.html")]
-async fn index() -> impl Responder {
+// The web UI.
+async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> impl Responder {
     format!("Hello World!")
 }
