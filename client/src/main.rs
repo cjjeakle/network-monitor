@@ -26,7 +26,7 @@ impl PingData {
     }
 }
 
-#[actix_web::main] // or #[tokio::main]
+#[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let ping_data = Arc::new(Mutex::new(PingData {
         data: BTreeMap::new(),
