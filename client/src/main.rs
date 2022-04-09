@@ -2,6 +2,7 @@
 use actix_web::{get, web, App, HttpServer, Responder};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Utc};
+use reqwest;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -51,11 +52,16 @@ fn repeatedly_ping(ping_data: Arc<Mutex<PingData>>) {
         let ping_data_write_clone = Arc::clone(&ping_data);
         thread::spawn(move || {
             let start_time: DateTime<Utc> = Utc::now();
-            let how_long = Duration::from_millis(10); // TODO: IMPLEMENT <=====================
+            let body = reqwest::blocking::get(config::PING_DESTINATION)
+                .unwrap()
+                .text()
+                .unwrap();
+            println!("response body = {:?}", body);
+            let how_long = Utc::now() - start_time;
             ping_data_write_clone
                 .lock()
                 .unwrap()
-                .add_entry(start_time, how_long);
+                .add_entry(start_time, how_long.to_std().unwrap());
         });
         // Wait for the ping interval to elapse and repeat.
         thread::sleep(

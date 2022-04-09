@@ -3,11 +3,12 @@ A utility to monitor network performance
 
 ## Build
 * [Install `rustup`](https://www.rust-lang.org/tools/install)
-* Update (`rustup update`)
+* This project uses nightly features: `rustup install nightly`
+* Ensure you're up-to-date (`rustup update`)
 * Build the client:
   ```
   cd client
-  cargo fmt && cargo build
+  cargo fmt && cargo +nightly build
   ```
 
 ## Deploy
