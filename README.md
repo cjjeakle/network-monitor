@@ -50,8 +50,8 @@ A utility to monitor network performance
 #### Updates
 Binary update script:
 ```
-sudo systemctl stop network-monitor.service && \
 cargo +nightly build --release --manifest-path=client/Cargo.toml && \
+sudo systemctl stop network-monitor.service && \
 sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/ && \
 sudo systemctl start network-monitor.service && \
 sudo systemctl status network-monitor.service

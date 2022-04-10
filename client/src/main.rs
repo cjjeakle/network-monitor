@@ -39,7 +39,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(ping_data_read_clone.clone())
             .route("/", web::get().to(index))
     })
-    .bind(("127.0.0.1", config::WEB_UI_PORT))?
+    .bind(("0.0.0.0", config::WEB_UI_PORT))?
     .run()
     .await;
 }
