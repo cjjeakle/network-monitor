@@ -6,8 +6,8 @@ Type=simple
 Restart=always
 User=network-monitor
 Group=network-monitor
-WorkingDirectory=/usr/bin/network-monitor
-ExecStart=/usr/bin/network-monitor/client
+WorkingDirectory=/usr/bin/network-monitor/client
+ExecStart=/usr/bin/network-monitor/client/network-monitor
 
 [Install]
 WantedBy=multi-user.target

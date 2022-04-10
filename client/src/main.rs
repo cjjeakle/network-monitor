@@ -69,5 +69,8 @@ fn repeatedly_ping(ping_data: Arc<Mutex<PingData>>) {
 
 // The web UI.
 async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> impl Responder {
-    format!("Hello World! Ping records: {:?}", ping_data.lock().unwrap().data.len())
+    format!(
+        "Hello World! Ping records: {:?}",
+        ping_data.lock().unwrap().data.len()
+    )
 }
