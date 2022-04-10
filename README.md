@@ -24,6 +24,8 @@ A utility to monitor network performance
   * Visit in a browser: http://ping.projects.chrisjeakle.com/
 
 ### Client Side
+
+#### Initial Deploy
 * SSH into the client device
 * Create an ssh key on the target device
   * `ssh-keygen -t rsa -b 4096 -C "pi@pi4.local" -f ~/.ssh/id_rsa`
@@ -33,7 +35,7 @@ A utility to monitor network performance
   * `cargo +nightly build --release --manifest-path=client/Cargo.toml`
 * Copy the client binary to the appropriate folder on the client device
   * `sudo mkdir -p /usr/bin/network-monitor/client/`
-  * `cp client/target/release/network-monitor /usr/bin/network-monitor/client/`
+  * `sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/`
 * Create a new non-root user to run the service
   * `sudo useradd --system network-monitor`
     * Create a `system`  user, we have no need for interactive shell sessions or a home dir
@@ -43,6 +45,14 @@ A utility to monitor network performance
   * Monitor service health:
     * `sudo systemctl status network-monitor.service`
     * `sudo journalctl -u network-monitor | less +G`
-  * To restart after binary changes:
-    * `sudo systemctl restart network-monitor.service`
 * View the network ping logs in a browser at http://localhost:8180 or http://pi4.local:8180
+
+#### Updates
+Binary update script:
+```
+sudo systemctl stop network-monitor.service && \
+cargo +nightly build --release --manifest-path=client/Cargo.toml && \
+sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/ && \
+sudo systemctl start network-monitor.service && \
+sudo systemctl status network-monitor.service
+```
