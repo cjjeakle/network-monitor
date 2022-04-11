@@ -152,7 +152,7 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
                 let mut magnitude_bars = String::new();
                 while i < log_pct_of_timeout {
                     magnitude_bars += "|";
-                    i += 5;
+                    i += 2;
                 }
                 html += format!(
                     "<tr><td>{:?}</td><td>{:.3}</td><td>{}</td></tr>",
