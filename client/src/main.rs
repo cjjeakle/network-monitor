@@ -1,6 +1,6 @@
 #![feature(map_first_last)]
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -117,11 +117,17 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
             let mut magnitude_bars = String::new();
             while i < log_pct_of_timeout {
                 magnitude_bars += "|";
-                i += 2;
+                i += 4;
             }
+            let local_timestamp = DateTime::<Local>::from(timestamp.clone());
             html += format!(
-                "<tr><td>{:?}</td><td>{:.3} ms</td><td>{}</td></tr>",
-                timestamp,
+                "<tr><td>{:02}-{:02}-{:02} {:02}:{:02}:{:02}</td><td>{:.3} ms</td><td>{}</td></tr>",
+                local_timestamp.year_ce().1,
+                local_timestamp.month(),
+                local_timestamp.day(),
+                local_timestamp.hour(),
+                local_timestamp.minute(),
+                local_timestamp.second(),
                 duration.as_secs_f32() * 1000.0,
                 magnitude_bars
             )

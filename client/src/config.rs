@@ -1,8 +1,8 @@
-pub const PING_DESTINATION: [&str; 2] = [
-    "https://192.168.1.1/",
+pub const PING_DESTINATION: [&str; 3] = [
+    "http://192.168.1.1",
+    "http://priter.local",
     "http://ping.projects.chrisjeakle.com/ping/",
 ];
-pub const INTERFACES_TO_MONITOR: [&str; 1] = ["eth0"];
 pub const SEC_BETWEEN_PINGS: u64 = 5;
 pub const PING_TIMEOUT_MSEC: u64 = 1_000;
 pub const MAX_ENTRIES_SAVED: usize = 30 * 24 * (60 / SEC_BETWEEN_PINGS as usize); // 30 days
