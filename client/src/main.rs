@@ -126,14 +126,13 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
             }
             let local_timestamp = DateTime::<Local>::from(timestamp.clone());
             html += format!(
-                "<tr><td>{:02}-{:02}-{:02} {:02}:{:02}:{:02}</td><td>{:.3} ms</td><td>{}</td></tr>",
-                local_timestamp.year_ce().1,
+                "<tr><td>{:02}-{:02} {:02}:{:02}:{:02}</td><td>{:_>6.1} ms</td><td>{}</td></tr>",
                 local_timestamp.month(),
                 local_timestamp.day(),
-                local_timestamp.hour(),
+                local_timestamp.hour12().1,
                 local_timestamp.minute(),
                 local_timestamp.second(),
-                duration.as_secs_f32() * 1000.0,
+                duration.as_secs_f64() * 1000.0,
                 magnitude_bars
             )
             .as_str();
