@@ -12,23 +12,23 @@ struct PingData {
     data: BTreeMap<String, BTreeMap<String, BTreeMap<DateTime<Utc>, Duration>>>,
 }
 impl PingData {
-    fn add_interface(&mut self, interface: &str) {
-        self.data.insert(interface.to_string(), BTreeMap::new());
+    fn add_url(&mut self, url: &str) {
+        self.data.insert(url.to_string(), BTreeMap::new());
     }
-    fn add_url_to_interface(&mut self, interface: &String, url: &str) {
+    fn add_interface_to_url(&mut self, url: &String, interface: &str) {
         self.data
-            .get_mut(interface)
+            .get_mut(url)
             .unwrap()
-            .insert(url.to_string(), BTreeMap::new());
+            .insert(interface.to_string(), BTreeMap::new());
     }
     fn add_entry(
         &mut self,
-        interface: &String,
         url: &String,
+        interface: &String,
         when: DateTime<Utc>,
         how_long: Duration,
     ) {
-        let ping_results = self.data.get_mut(interface).unwrap().get_mut(url).unwrap();
+        let ping_results = self.data.get_mut(url).unwrap().get_mut(interface).unwrap();
         if ping_results.len() >= config::MAX_ENTRIES_SAVED {
             ping_results.pop_first(); // Drop the oldest entry
         }
@@ -41,20 +41,21 @@ async fn main() -> std::io::Result<()> {
     let ping_data = Arc::new(Mutex::new(PingData {
         data: BTreeMap::new(),
     }));
-    for interface in config::INTERFACES_TO_MONITOR {
-        ping_data.lock().unwrap().add_interface(&interface);
-        for url in config::PING_DESTINATION {
-            let interface_threadlocal = interface.to_string();
+
+    for url in config::PING_DESTINATION {
+        ping_data.lock().unwrap().add_url(&url);
+        for interface in config::INTERFACES_TO_MONITOR {
             let url_threadlocal = url.to_string();
+            let interface_threadlocal = interface.to_string();
             let ping_data_threadlocal = ping_data.clone();
             ping_data
                 .lock()
                 .unwrap()
-                .add_url_to_interface(&interface_threadlocal, &url_threadlocal);
+                .add_interface_to_url(&url_threadlocal, interface);
             thread::spawn(move || {
                 repeatedly_ping(
-                    interface_threadlocal,
                     url_threadlocal,
+                    interface_threadlocal,
                     ping_data_threadlocal,
                 )
             });
@@ -72,12 +73,12 @@ async fn main() -> std::io::Result<()> {
 }
 
 // Pings the destination URI.
-fn repeatedly_ping(interface: String, url: String, ping_data: Arc<Mutex<PingData>>) {
+fn repeatedly_ping(url: String, interface: String, ping_data: Arc<Mutex<PingData>>) {
     loop {
         // Kick off a worker thread to perform a ping and append the result to `PingData`.
-        let ping_data_threadlocal = ping_data.clone();
-        let interface_threadlocal = interface.clone();
         let url_threadlocal = url.clone();
+        let interface_threadlocal = interface.clone();
+        let ping_data_threadlocal = ping_data.clone();
         thread::spawn(move || {
             let start_time: DateTime<Utc> = Utc::now();
             let _result = ureq::get(url_threadlocal.as_str())
@@ -85,8 +86,8 @@ fn repeatedly_ping(interface: String, url: String, ping_data: Arc<Mutex<PingData
                 .call();
             let how_long = Utc::now() - start_time;
             ping_data_threadlocal.lock().unwrap().add_entry(
-                &interface_threadlocal,
                 &url_threadlocal,
+                &interface_threadlocal,
                 start_time,
                 how_long.to_std().unwrap(),
             );
@@ -129,21 +130,21 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     html += "</tr></thead>";
     html += "<tbody><tr>";
     // Add the per-interface data
-    for interface_data in locked_data {
+    for url_data in locked_data {
         // Add URL headings, each will get a column
         html += "<td><table><thead><tr>";
-        for url_data in interface_data.1 {
-            html += format!("<th>{}</th>", url_data.0).as_str();
+        for interface_data in url_data.1 {
+            html += format!("<th>{}</th>", interface_data.0).as_str();
         }
         html += "</tr><thead>";
         // Add the per-url data
         html += "<tbody><tr>";
-        for url_data in interface_data.1 {
+        for interface_data in url_data.1 {
             // Label the per-URL ping data fields
             html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>relative magnitude</th></tr></thead>";
             // Rows of per-URL ping data
             html += "<tbody>";
-            for (timestamp, duration) in url_data.1.iter().rev() {
+            for (timestamp, duration) in interface_data.1.iter().rev() {
                 let mut i: u16 = 0;
                 let log_pct_of_timeout = (f64::from(duration.as_millis() as f64)
                     .log(config::PING_TIMEOUT_MSEC as f64)
