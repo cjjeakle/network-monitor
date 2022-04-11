@@ -2,8 +2,8 @@
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
+use get_if_addrs;
 use std::collections::BTreeMap;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -35,18 +35,13 @@ async fn main() -> std::io::Result<()> {
     let mut destination_urls: Vec<String> =
         config::PING_DESTINATION.iter().map(|&s| s.into()).collect();
     // Add some local interfaces
-    for iface in config::ECHO_INTERFACES {
-        let result = Command::new(format!(
-            "/sbin/ifconfig {} | grep 'inet' | cut -d: -f2 | awk '{{ print $2}}'",
-            iface
-        ))
-        .output()
-        .expect("failed to execute process")
-        .stdout;
-        let ip_addr = String::from_utf8_lossy(&result);
-        if ip_addr.len() >= 7 {
-            println!("iface: {} ip address: {}", iface, ip_addr);
-            destination_urls.push(format!("http://{}", ip_addr));
+    // List all of the machine's network interfaces
+    for iface in get_if_addrs::get_if_addrs().unwrap() {
+        if config::ECHO_INTERFACES
+            .into_iter()
+            .any(|v| v == &iface.name)
+        {
+            destination_urls.push(format!("http://{}", iface.addr.ip()));
         }
     }
 
@@ -117,22 +112,22 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     }
     </style>";
 
+    let locked_data = &ping_data.lock().unwrap().data;
+
     // Add URL headings, each will get a column
     html += "<table><thead><tr>";
-    for url in config::PING_DESTINATION {
-        html += format!("<th>{}</th>", url).as_str();
+    for url_data in locked_data {
+        html += format!("<th>{}</th>", url_data.0).as_str();
     }
     html += "</tr></thead>";
     html += "<tbody><tr>";
     // Add the per-url data
-    let locked_data = &ping_data.lock().unwrap().data;
-    for url in config::PING_DESTINATION {
-        let url_data = &locked_data[url];
+    for url_data in locked_data {
         // Label the per-URL ping data fields
         html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>relative magnitude</th></tr></thead>";
         // Rows of per-URL ping data
         html += "<tbody>";
-        for (timestamp, duration) in url_data.iter().rev() {
+        for (timestamp, duration) in url_data.1.iter().rev() {
             let mut i: u16 = 0;
             let log_pct_of_timeout = (f64::from(duration.as_millis() as f64)
                 .log(config::PING_TIMEOUT_MSEC as f64)
