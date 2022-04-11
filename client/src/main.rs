@@ -155,9 +155,9 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
                     i += 2;
                 }
                 html += format!(
-                    "<tr><td>{:?}</td><td>{:.3}</td><td>{}</td></tr>",
+                    "<tr><td>{:?}</td><td>{:.3} ms</td><td>{}</td></tr>",
                     timestamp,
-                    duration.as_secs_f32(),
+                    duration.as_secs_f32() * 1000.0,
                     magnitude_bars
                 )
                 .as_str();
