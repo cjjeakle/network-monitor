@@ -2,6 +2,7 @@
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
+use std::cmp;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -51,12 +52,16 @@ async fn main() -> std::io::Result<()> {
 
 // Pings the destination URI.
 fn repeatedly_ping(url: String, ping_data: Arc<Mutex<PingData>>) {
+    let agent = ureq::builder()
+        .timeout(Duration::from_millis(config::PING_TIMEOUT_MSEC))
+        .build();
     loop {
         // Kick off a worker thread to perform a ping and append the result to `PingData`.
         let url_threadlocal = url.clone();
         let ping_data_threadlocal = ping_data.clone();
         let start_time: DateTime<Utc> = Utc::now();
-        let _result = ureq::get(url_threadlocal.as_str())
+        let _result = agent
+            .get(url_threadlocal.as_str())
             .timeout(Duration::from_millis(config::PING_TIMEOUT_MSEC))
             .call();
         let how_long = Utc::now() - start_time;
@@ -66,12 +71,12 @@ fn repeatedly_ping(url: String, ping_data: Arc<Mutex<PingData>>) {
             how_long.to_std().unwrap(),
         );
         // Wait for the ping interval to elapse and repeat.
-        thread::sleep(
-            ((start_time + chrono_Duration::seconds(config::SEC_BETWEEN_PINGS as i64))
-                - Utc::now())
-            .to_std()
-            .unwrap(),
-        );
+        let next_ping_time =
+            start_time + chrono_Duration::seconds(config::SEC_BETWEEN_PINGS as i64);
+        let cur_time = Utc::now();
+        if next_ping_time > cur_time {
+            thread::sleep((next_ping_time - cur_time).to_std().unwrap());
+        }
     }
 }
 
@@ -81,21 +86,31 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
 
     // Style the tables
     html += "<style>
-    table {
-      margin: 0 auto;
+    * {
+        // Reset default margin & padding
+        margin:0;
+        padding:0;
+    }
+    html,body {
+        position:relative;
     }
     table {
-      color: black;
-      background: white;
-      border: 1px solid grey;
+        width:100%;
+        margin: 0 auto;
+    }
+    table {
+        color: black;
+        background: white;
+        border: 1px solid grey;
     }
     table caption {
-      padding:.5em;
+        padding:.5em;
     }
     table th,
     table td {
-      padding: .5em;
-      border: 1px solid lightgrey;
+        vertical-align: top;
+        padding: .5em;
+        border: 1px solid lightgrey;
     }
     </style>";
 
@@ -109,20 +124,26 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     html += "</tr></thead>";
     html += "<tbody><tr>";
     // Add the per-url data
-    for url_data in locked_data {
+    for (_, url_data) in locked_data {
         // Label the per-URL ping data fields
         html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
         // Rows of per-URL ping data
         html += "<tbody>";
-        for (timestamp, duration) in url_data.1.iter().rev() {
+        let mut min = 0;
+        let mut max = 0;
+        for (_, duration) in url_data {
+            min = cmp::min(duration.as_millis(), min);
+            max = cmp::max(duration.as_millis(), max);
+        }
+        let range = max - min;
+        for (timestamp, duration) in url_data.iter().rev() {
             let mut i: u16 = 0;
-            let log_pct_of_timeout = (f64::from(duration.as_millis() as f64)
-                .log(config::PING_TIMEOUT_MSEC as f64)
-                * 100.0) as u16;
+            let pct_of_range =
+                (((duration.as_millis() - min + 1) as f64) / (range as f64) * 100.0) as u16;
             let mut magnitude_bars = String::new();
-            while i < log_pct_of_timeout {
-                magnitude_bars += "|";
-                i += 4;
+            while i < pct_of_range {
+                magnitude_bars += "█";
+                i += 10;
             }
             let local_timestamp = DateTime::<Local>::from(timestamp.clone());
             html += format!(
