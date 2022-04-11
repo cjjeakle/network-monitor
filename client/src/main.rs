@@ -2,7 +2,6 @@
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
-use get_if_addrs;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -32,25 +31,13 @@ async fn main() -> std::io::Result<()> {
         data: BTreeMap::new(),
     }));
 
-    let mut destination_urls: Vec<String> =
-        config::PING_DESTINATION.iter().map(|&s| s.into()).collect();
-    // Add some local interfaces
-    // List all of the machine's network interfaces
-    for iface in get_if_addrs::get_if_addrs().unwrap() {
-        if config::ECHO_INTERFACES
-            .into_iter()
-            .any(|v| v == &iface.name)
-        {
-            destination_urls.push(format!("http://{}", iface.addr.ip()));
-        }
-    }
-
-    for url in destination_urls {
+    for url in config::PING_DESTINATION {
         ping_data.lock().unwrap().add_url(&url);
         let url_threadlocal = url.to_string();
         let ping_data_threadlocal = ping_data.clone();
         thread::spawn(move || repeatedly_ping(url_threadlocal, ping_data_threadlocal));
     }
+
     let ping_data_read_clone = web::Data::new(Arc::clone(&ping_data));
     return HttpServer::new(move || {
         App::new()
