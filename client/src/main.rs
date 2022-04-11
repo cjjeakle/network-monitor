@@ -3,6 +3,7 @@ use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use std::collections::BTreeMap;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -31,7 +32,25 @@ async fn main() -> std::io::Result<()> {
         data: BTreeMap::new(),
     }));
 
-    for url in config::PING_DESTINATION {
+    let mut destination_urls: Vec<String> =
+        config::PING_DESTINATION.iter().map(|&s| s.into()).collect();
+    // Add some local interfaces
+    for iface in config::ECHO_INTERFACES {
+        let result = Command::new(format!(
+            "/sbin/ifconfig {} | grep 'inet' | cut -d: -f2 | awk '{{ print $2}}'",
+            iface
+        ))
+        .output()
+        .expect("failed to execute process")
+        .stdout;
+        let ip_addr = String::from_utf8_lossy(&result);
+        if ip_addr.len() >= 7 {
+            println!("iface: {} ip address: {}", iface, ip_addr);
+            destination_urls.push(format!("http://{}", ip_addr));
+        }
+    }
+
+    for url in destination_urls {
         ping_data.lock().unwrap().add_url(&url);
         let url_threadlocal = url.to_string();
         let ping_data_threadlocal = ping_data.clone();
