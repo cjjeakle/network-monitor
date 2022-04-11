@@ -111,7 +111,7 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     // Add the per-url data
     for url_data in locked_data {
         // Label the per-URL ping data fields
-        html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>relative magnitude</th></tr></thead>";
+        html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
         // Rows of per-URL ping data
         html += "<tbody>";
         for (timestamp, duration) in url_data.1.iter().rev() {
