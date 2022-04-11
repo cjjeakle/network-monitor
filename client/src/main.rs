@@ -1,5 +1,6 @@
 #![feature(map_first_last)]
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
+use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -53,20 +54,23 @@ fn repeatedly_ping(url: String, ping_data: Arc<Mutex<PingData>>) {
         // Kick off a worker thread to perform a ping and append the result to `PingData`.
         let url_threadlocal = url.clone();
         let ping_data_threadlocal = ping_data.clone();
-        thread::spawn(move || {
-            let start_time: DateTime<Utc> = Utc::now();
-            let _result = ureq::get(url_threadlocal.as_str())
-                .timeout(Duration::from_millis(config::PING_TIMEOUT_MSEC))
-                .call();
-            let how_long = Utc::now() - start_time;
-            ping_data_threadlocal.lock().unwrap().add_entry(
-                &url_threadlocal,
-                start_time,
-                how_long.to_std().unwrap(),
-            );
-        });
+        let start_time: DateTime<Utc> = Utc::now();
+        let _result = ureq::get(url_threadlocal.as_str())
+            .timeout(Duration::from_millis(config::PING_TIMEOUT_MSEC))
+            .call();
+        let how_long = Utc::now() - start_time;
+        ping_data_threadlocal.lock().unwrap().add_entry(
+            &url_threadlocal,
+            start_time,
+            how_long.to_std().unwrap(),
+        );
         // Wait for the ping interval to elapse and repeat.
-        thread::sleep(Duration::from_secs(config::SEC_BETWEEN_PINGS));
+        thread::sleep(
+            ((start_time + chrono_Duration::seconds(config::SEC_BETWEEN_PINGS as i64))
+                - Utc::now())
+            .to_std()
+            .unwrap(),
+        );
     }
 }
 

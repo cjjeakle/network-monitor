@@ -1,7 +1,7 @@
 pub const PING_DESTINATION: [&str; 3] = [
-    "http://192.168.1.1",
-    "http://priter.local",
     "http://ping.projects.chrisjeakle.com/ping/",
+    "http://192.168.1.1",
+    "http://printer.local/general/status.html",
 ];
 pub const SEC_BETWEEN_PINGS: u64 = 5;
 pub const PING_TIMEOUT_MSEC: u64 = 1_000;
