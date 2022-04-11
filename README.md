@@ -31,8 +31,6 @@ A utility to monitor network performance
   * `ssh-keygen -t rsa -b 4096 -C "pi@pi4.local" -f ~/.ssh/id_rsa`
 * `cat ~/.ssh/id_rsa.pub` and add it as a readonly deploy key for the repo
 * Configure the application by editing `client/config.rs`
-* List available network interfaces
-  * `ip link show`
 * Build the client
   * `cargo +nightly build --release --manifest-path=client/Cargo.toml`
 * Copy the client binary to the appropriate folder on the client device
