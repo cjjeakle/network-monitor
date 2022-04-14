@@ -129,25 +129,22 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
         html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
         // Rows of per-URL ping data
         html += "<tbody>";
-        let mut min = 0;
-        let mut max = 0;
-        for (_, duration) in url_data {
-            min = cmp::min(duration.as_millis(), min);
-            max = cmp::max(duration.as_millis(), max);
-        }
-        let range = max - min;
         for (timestamp, duration) in url_data.iter().rev() {
-            let mut i: u16 = 0;
-            let pct_of_range =
-                (((duration.as_millis() - min + 1) as f64) / (range as f64) * 100.0) as u16;
-            let mut magnitude_bars = String::new();
-            while i < pct_of_range {
+            let tens_of_ms = duration.as_millis() / 10;
+            // Print a bar for every 10 ms, with a max of 10 bars
+            let mut num_bars = cmp::min(tens_of_ms, 10);
+            let mut magnitude_bars = "".to_string();
+            while num_bars > 0 {
                 magnitude_bars += "█";
-                i += 10;
+                num_bars -= 1;
+            }
+            // Anything greater than 100 MS is "off the charts", annotate that
+            if tens_of_ms > 10 {
+                magnitude_bars += "▓▒░";
             }
             let local_timestamp = DateTime::<Local>::from(timestamp.clone());
             html += format!(
-                "<tr><td>{:02}-{:02} {:02}:{:02}:{:02}</td><td>{:_>6.1} ms</td><td>{}</td></tr>",
+                "<tr><td>{:02}-{:02} {:02}:{:02}:{:02}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
                 local_timestamp.month(),
                 local_timestamp.day(),
                 local_timestamp.hour12().1,
