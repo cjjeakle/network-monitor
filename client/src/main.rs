@@ -1,4 +1,5 @@
 #![feature(map_first_last)]
+
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
@@ -144,12 +145,13 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
             }
             let local_timestamp = DateTime::<Local>::from(timestamp.clone());
             html += format!(
-                "<tr><td>{:02}-{:02} {:02}:{:02}:{:02}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
+                "<tr><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
                 local_timestamp.month(),
                 local_timestamp.day(),
                 local_timestamp.hour12().1,
                 local_timestamp.minute(),
                 local_timestamp.second(),
+                if local_timestamp.hour12().0 { "AM" } else { "PM" },
                 duration.as_secs_f64() * 1000.0,
                 magnitude_bars
             )
