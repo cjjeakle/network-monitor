@@ -6,7 +6,11 @@ A utility to monitor network performance
 * This project uses nightly features: `rustup install nightly`
 * Ensure you're up-to-date (`rustup update`)
 * Build the client:\
-  `cargo fmt --manifest-path=client/Cargo.toml && cargo +nightly build --manifest-path=client/Cargo.toml`
+  ```
+  cargo fmt --manifest-path=client/Cargo.toml && \
+  cargo +nightly build --manifest-path=client/Cargo.toml && \
+  sudo setcap cap_net_admin,cap_net_raw=eip ./client/target/debug/network-monitor
+  ```
 
 ## Deploy
 

@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 actix-web = "4.0.0"
 chrono = "0.4"
-ureq = "2.4.0"
+dns-lookup = "1.0.8"
+socket2 = "0.4.4"
