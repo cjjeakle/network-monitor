@@ -9,7 +9,7 @@ A utility to monitor network performance
   ```
   cargo fmt --manifest-path=client/Cargo.toml && \
   cargo +nightly build --manifest-path=client/Cargo.toml && \
-  sudo setcap cap_net_admin,cap_net_raw=eip ./client/target/debug/network-monitor
+  sudo setcap cap_net_admin,cap_net_raw=eip client/target/debug/network-monitor
   ```
 
 ## Deploy
@@ -37,6 +37,8 @@ A utility to monitor network performance
 * Configure the application by editing `client/config.rs`
 * Build the client
   * `cargo +nightly build --release --manifest-path=client/Cargo.toml`
+* Apply capabilities so the program is permitted to create raw sockets
+  * `sudo setcap cap_net_admin,cap_net_raw=eip client/target/release/network-monitor`
 * Copy the client binary to the appropriate folder on the client device
   * `sudo mkdir -p /usr/bin/network-monitor/client/`
   * `sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/`
@@ -55,6 +57,7 @@ A utility to monitor network performance
 Binary update script:
 ```
 cargo +nightly build --release --manifest-path=client/Cargo.toml && \
+sudo setcap cap_net_admin,cap_net_raw=eip client/target/release/network-monitor && \
 sudo systemctl stop network-monitor.service && \
 sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/ && \
 sudo systemctl start network-monitor.service && \

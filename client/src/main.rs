@@ -1,4 +1,5 @@
 #![feature(map_first_last)]
+#![feature(maybe_uninit_slice)]
 
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
 use chrono::Duration as chrono_Duration;
@@ -14,6 +15,83 @@ use std::thread;
 use std::time::Duration;
 
 mod config;
+
+#[derive(Debug)]
+struct IcmpEchoHeader {
+    msg_type: u8,
+    code: u8,
+    checksum: u16,
+    identifier: u16,
+    sequence_number: u16,
+    // We won't send any data.
+}
+impl IcmpEchoHeader {
+    fn new(identifier: u16, sequence_number: u16) -> IcmpEchoHeader {
+        let mut header = IcmpEchoHeader {
+            // https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml
+            // ECHO = 8, ECHO_REPLY = 0
+            msg_type: 8,
+            code: 0,
+            checksum: 0,
+            identifier: identifier,
+            sequence_number: sequence_number,
+        };
+        header.checksum = header.compute_checksum();
+        return header;
+    }
+
+    // Marshall out of a big endian buffer
+    fn from(be_recv_buf: [MaybeUninit<u8>; 8]) -> IcmpEchoHeader {
+        let be_safe_buf = unsafe { MaybeUninit::slice_assume_init_ref(&be_recv_buf) };
+        let mut safe_buf: [u8; 8] = [0; 8];
+        for i in 0..8 {
+            safe_buf[i] = be_safe_buf[i];
+        }
+        // Words on x86 and x86_64 appear to be 16-bit.
+        // Thus, we swap every other byte as we de-serialize.
+        let header = IcmpEchoHeader {
+            msg_type: safe_buf[1],
+            code: safe_buf[0],
+            checksum: u16::from(safe_buf[3]) << 8 | u16::from(safe_buf[2]),
+            identifier: u16::from(safe_buf[5]) << 8 | u16::from(safe_buf[4]),
+            sequence_number: u16::from(safe_buf[7]) << 8 | u16::from(safe_buf[6]),
+        };
+        return header;
+    }
+
+    // Splits the header into 16-bit values and return the 1's complement.
+    fn compute_checksum(&self) -> u16 {
+        // Turn type and code into a single 16-bit field.
+        let mut type_and_code_concatenated: u16 = u16::from(self.msg_type) << 8;
+        // Put code in the lower 8 bits;
+        type_and_code_concatenated += u16::from(self.code);
+
+        // Compute the checksum.
+        let mut sum: u16 = 0;
+        sum += type_and_code_concatenated;
+        sum += 0; // Use 0 for checksum when computing the checksum.
+        sum += self.identifier;
+        sum += self.sequence_number;
+
+        // Return the 1's complement of the sum.
+        return !sum;
+    }
+
+    fn serialize(&self) -> [u8; 8] {
+        // `IcmpEchoHeader` is 8B
+        let mut buf: [u8; 8] = [0; 8];
+        let u8mask: u16 = 0xff;
+        buf[0] = self.msg_type;
+        buf[1] = self.code;
+        buf[2] = (self.checksum >> 8 & u8mask) as u8;
+        buf[3] = (self.checksum & u8mask) as u8;
+        buf[4] = (self.identifier >> 8 & u8mask) as u8;
+        buf[5] = (self.identifier & u8mask) as u8;
+        buf[6] = (self.sequence_number >> 8 & u8mask) as u8;
+        buf[7] = (self.sequence_number & u8mask) as u8;
+        return buf;
+    }
+}
 
 struct PingData {
     data: BTreeMap<String, BTreeMap<DateTime<Utc>, Duration>>,
@@ -37,11 +115,39 @@ async fn main() -> std::io::Result<()> {
         data: BTreeMap::new(),
     }));
 
+    // ICMP is connectionless, so share a single socket to keep things simple.
+    // (If we use multiple sockets, responses can land on any of them)
+    let socket = Arc::new(Mutex::new(
+        Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap(),
+    ));
+    let ping_timeout = Duration::from_millis(config::PING_TIMEOUT_MSEC);
+    socket
+        .lock()
+        .unwrap()
+        .set_write_timeout(Some(ping_timeout))
+        .unwrap();
+    socket
+        .lock()
+        .unwrap()
+        .set_read_timeout(Some(ping_timeout))
+        .unwrap();
+
+    let mut thread_id = 0;
     for hostname in config::PING_DESTINATION {
         ping_data.lock().unwrap().add_hostname(&hostname);
         let hostname_threadlocal = hostname.to_string();
+        let socket_threadlocal = socket.clone();
         let ping_data_threadlocal = ping_data.clone();
-        thread::spawn(move || repeatedly_ping(hostname_threadlocal, ping_data_threadlocal));
+        thread::spawn(move || {
+            repeatedly_ping(
+                hostname_threadlocal,
+                thread_id,
+                socket_threadlocal,
+                ping_timeout,
+                ping_data_threadlocal,
+            )
+        });
+        thread_id += 1;
     }
 
     let ping_data_read_clone = web::Data::new(Arc::clone(&ping_data));
@@ -56,37 +162,69 @@ async fn main() -> std::io::Result<()> {
 }
 
 // Pings the destination URI.
-fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
+fn repeatedly_ping(
+    hostname: String,
+    identifier: u16,
+    socket: Arc<Mutex<Socket>>,
+    ping_timeout: Duration,
+    ping_data: Arc<Mutex<PingData>>,
+) {
     let dest_ip = *lookup_host(&hostname).unwrap().first().unwrap();
-    let dest_socket1 = SocketAddr::new(dest_ip, 0);
-    let dest_socket2: SockAddr = dest_socket1.into();
-    let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_millis(config::PING_TIMEOUT_MSEC)))
-        .unwrap();
-    let mut recv_buf = [MaybeUninit::new(0); 256];
+    let dest_addr_v1 = SocketAddr::new(dest_ip, 0);
+    let dest_addr_v2: SockAddr = dest_addr_v1.into();
+    let mut recv_buf = [MaybeUninit::new(0); 8];
+    let mut sequence_number: u16 = 0;
     loop {
-        let start_time: DateTime<Utc> = Utc::now();
-        // Send a ping.
-        // Ignore errors, if this fails or times out, we'll just roll with it.
-        let _err = socket.send_to(&[], &dest_socket2);
-        // Recv the response.
-        assert_eq!(
-            socket
-                .recv_from(&mut recv_buf)
-                .unwrap()
-                .1
-                .as_socket()
-                .unwrap(),
-            dest_socket1
-        );
-        // Determine the time it took.
-        let how_long = Utc::now() - start_time;
+        let start_time = Utc::now();
+        let deadline = start_time + chrono_Duration::from_std(ping_timeout).unwrap();
+        // Construct an ICMP Ping header.
+        let hdr = IcmpEchoHeader::new(identifier, sequence_number);
+        sequence_number += 1;
+        // Send the ping.
+        let send_res = socket
+            .lock()
+            .unwrap()
+            .send_to(&hdr.serialize(), &dest_addr_v2);
+        match send_res {
+            Ok(_size) => {}
+            Err(err) => eprintln!("Error while sending to {} - {:?}", dest_addr_v1, err),
+        }
+        // Wait until our remote's response is available.
+        while Utc::now() < deadline {
+            let peek_res = socket.lock().unwrap().peek_from(&mut recv_buf);
+            let peek_remote_address = peek_res.unwrap().1.as_socket().unwrap();
+            if peek_remote_address == dest_addr_v1 {
+                // Our remote's response is available.
+                break;
+            }
+        }
+        if Utc::now() < deadline {
+            // Recv the response.
+            let recv_res = socket.lock().unwrap().recv_from(&mut recv_buf);
+            match recv_res {
+                Ok((size, origin_addr)) => {
+                    let recv_origin = origin_addr.as_socket().unwrap();
+                    if size != 8 || recv_origin != dest_addr_v1 {
+                        eprintln!(
+                            "Recv expected 8B from {} but got {}B from {}",
+                            dest_addr_v1, size, recv_origin,
+                        );
+                    }
+                    let response = IcmpEchoHeader::from(recv_buf);
+                    if response.msg_type != 0 || response.code != 69 {
+                        eprintln!("Unexpected values in ICMP Echo Reply {:?}", response);
+                    }
+                }
+                Err(err) => eprintln!("Error while recving - {:?}", err),
+            }
+        }
+        // Determine the time it's been.
+        let ping_duration = (Utc::now() - start_time).to_std().unwrap();
         // Store the ping duration.
         ping_data
             .lock()
             .unwrap()
-            .add_entry(&hostname, start_time, how_long.to_std().unwrap());
+            .add_entry(&hostname, start_time, ping_duration);
         // Wait for the ping interval to elapse and repeat.
         let next_ping_time =
             start_time + chrono_Duration::seconds(config::SEC_BETWEEN_PINGS as i64);
