@@ -189,8 +189,9 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
     }
     // Use BPF to filter yet further. Only recv 84B ICMP Echo Reply packets annotated with our
     // thread's `unique_threadlocal_id`.
+    // https://www.kernel.org/doc/Documentation/networking/filter.txt
     // Generate BPF bytecode using `tcpdump`:
-    // `sudo tcpdump -nni eth0 -ddd icmp and src 192.168.1.1 and ip[3] == 84 and icmp[icmptype] == 0 and icmp[icmpcode] == 0`
+    // `sudo tcpdump -nni eth0 -dd icmp and src 192.168.1.1 and ip[3] == 84 and icmp[icmptype] == 0 and icmp[icmpcode] == 0`
     // let filters: [libc::sock_filter; 1] =[{
     //     code: 0 /* ICMP Echo Reply */,
     //     jt: /* jump true. */,

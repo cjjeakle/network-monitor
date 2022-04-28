@@ -57,9 +57,10 @@ A utility to monitor network performance
 Binary update script:
 ```
 cargo +nightly build --release --manifest-path=client/Cargo.toml && \
-sudo setcap cap_net_admin,cap_net_raw=eip client/target/release/network-monitor && \
 sudo systemctl stop network-monitor.service && \
 sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/ && \
+sudo setcap cap_net_admin,cap_net_raw=eip /usr/bin/network-monitor/client/network-monitor && \
 sudo systemctl start network-monitor.service && \
+sudo getcap /usr/bin/network-monitor/client/network-monitor && \
 sudo systemctl status network-monitor.service
 ```
