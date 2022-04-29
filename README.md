@@ -43,6 +43,7 @@ A utility to monitor network performance
   * `cargo +nightly build --release --manifest-path=client/Cargo.toml`
 * Apply capabilities so the program is permitted to create raw sockets
   * `sudo setcap cap_net_admin,cap_net_raw=eip client/target/release/network-monitor`
+  * Verify it worked using: `getcap /usr/bin/network-monitor/client/network-monitor`
 * Copy the client binary to the appropriate folder on the client device
   * `sudo mkdir -p /usr/bin/network-monitor/client/`
   * `sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/`
