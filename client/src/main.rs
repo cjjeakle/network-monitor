@@ -1,7 +1,9 @@
+#![feature(cursor_remaining)]
 #![feature(map_first_last)]
 #![feature(maybe_uninit_slice)]
 
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
+use byteorder::{BigEndian, ReadBytesExt};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use dns_lookup::lookup_host;
@@ -9,6 +11,7 @@ use rand::Rng;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::cmp;
 use std::collections::BTreeMap;
+use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
@@ -45,7 +48,8 @@ struct IcmpEchoMessage {
 }
 impl IcmpEchoMessage {
     fn new(identifier: u16, sequence_number: u16) -> IcmpEchoMessage {
-        let mut header = IcmpEchoMessage {
+        // Allocate an ICMP message for an ECHO, use boring default values.
+        let mut message = IcmpEchoMessage {
             // https://www.iana.org/assignments/icmp-parameters/icmp-parameters.xhtml
             // ECHO = 8, ECHO_REPLY = 0
             msg_type: 8,
@@ -55,84 +59,65 @@ impl IcmpEchoMessage {
             sequence_number: sequence_number,
             data: [0; 56],
         };
-        *header.data.first_mut().unwrap() = 'a' as u8;
-        *header.data.last_mut().unwrap() = 'z' as u8;
-        header.populate_checksum();
-        return header;
+        // Set some values in the data, just for fun.
+        *message.data.first_mut().unwrap() = 'a' as u8;
+        *message.data.last_mut().unwrap() = 'z' as u8;
+        // Set the checksum.
+        message.populate_checksum();
+        return message;
     }
 
     // Takes the sum of this message as 16-bit words, adds back in any carry out,
-    // and return the 1's complement.
+    // and return the 1's complement. Checksum must be set to 0 before calling this method.
     fn populate_checksum(&mut self) {
         // Compute the checksum (use a 32-bit value so overflow is graceful).
         let mut sum: u32 = 0;
-
-        // Take the sum of the header 16 bits at a time.
-        let serialized = self.serialize();
-        let mut i = 0;
-        while i < serialized.len() - 1 {
-            let upper_byte = u16::from(serialized[i] & 0xff) << 8;
-            let lower_byte = u16::from(serialized[i + 1] & 0xff);
-            sum += u32::from(upper_byte + lower_byte);
-            i += 2;
+        // Take the sum of the message 16 bits at a time.
+        let mut serialized = Cursor::new(self.serialize());
+        while !serialized.is_empty() {
+            sum += u32::from(serialized.read_u16::<BigEndian>().unwrap());
         }
-        if serialized.len() % 2 == 1 {
-            sum += u32::from(*serialized.last().unwrap()) << 8;
-        }
-
         // Add any overflow back in to the lower 16 bits.
         let mut checksum: u16 = ((sum >> 16) + (sum & 0xffff)) as u16;
         checksum += (sum >> 16) as u16;
         // Take the 1's complement of the sum.
-        checksum = !checksum;
-        // Set the checksum in big endian format.
-        self.checksum = (checksum & 0x00ff) << 8 | (checksum & 0xff00) >> 8;
+        self.checksum = !checksum;
     }
 
-    // Marshall into a buffer. Note that all values larger than 8-bits are big endian encoded.
+    // Marshall into a buffer using network byte order (big endian).
     fn serialize(&self) -> [u8; std::mem::size_of::<IcmpEchoMessage>()] {
-        // `IcmpEchoMessage` is 8B
-        let mut buf: [u8; std::mem::size_of::<IcmpEchoMessage>()] =
+        let mut buf_be: [u8; std::mem::size_of::<IcmpEchoMessage>()] =
             [0; std::mem::size_of::<IcmpEchoMessage>()];
-        let u8mask: u16 = 0xff;
-        buf[0] = self.msg_type;
-        buf[1] = self.code;
-        buf[3] = (self.checksum >> 8 & u8mask) as u8;
-        buf[2] = (self.checksum & u8mask) as u8;
-        buf[4] = (self.identifier >> 8 & u8mask) as u8;
-        buf[5] = (self.identifier & u8mask) as u8;
-        buf[6] = (self.sequence_number >> 8 & u8mask) as u8;
-        buf[7] = (self.sequence_number & u8mask) as u8;
-
+        buf_be[0] = self.msg_type;
+        buf_be[1] = self.code;
+        buf_be[2] = self.checksum.to_be_bytes()[0];
+        buf_be[3] = self.checksum.to_be_bytes()[1];
+        buf_be[4] = self.identifier.to_be_bytes()[0];
+        buf_be[5] = self.identifier.to_be_bytes()[1];
+        buf_be[6] = self.sequence_number.to_be_bytes()[0];
+        buf_be[7] = self.sequence_number.to_be_bytes()[1];
         let buf_data_start = 8;
         for data_idx in 0..self.data.len() {
-            buf[buf_data_start + data_idx] = self.data[data_idx];
+            buf_be[buf_data_start + data_idx] = self.data[data_idx];
         }
-
-        return buf;
+        return buf_be;
     }
 
-    // Marshall out of a buffer. Note that all values larger than 8-bits are big endian encoded.
-    fn from(be_recv_buf: &[MaybeUninit<u8>]) -> IcmpEchoMessage {
-        let be_safe_buf = unsafe { MaybeUninit::slice_assume_init_ref(&be_recv_buf) };
-        let mut safe_buf: [u8; std::mem::size_of::<IcmpEchoMessage>()] =
-            [0; std::mem::size_of::<IcmpEchoMessage>()];
-        for i in 0..std::mem::size_of::<IcmpEchoMessage>() {
-            safe_buf[i] = be_safe_buf[i];
-        }
+    // Marshall out of a network byte order (big endian) buffer.
+    fn from(buf_be: &[u8]) -> IcmpEchoMessage {
+        let mut buf_be_iter = Cursor::new(buf_be);
         // Words on x86 and x86_64 appear to be 16-bit.
         // Thus, we swap every other byte as we de-serialize.
         let mut message = IcmpEchoMessage {
-            msg_type: safe_buf[0],
-            code: safe_buf[1],
-            checksum: u16::from(safe_buf[3]) << 8 | u16::from(safe_buf[2]),
-            identifier: u16::from(safe_buf[4]) << 8 | u16::from(safe_buf[5]),
-            sequence_number: u16::from(safe_buf[6]) << 8 | u16::from(safe_buf[7]),
+            msg_type: buf_be_iter.read_u8().unwrap(),
+            code: buf_be_iter.read_u8().unwrap(),
+            checksum: buf_be_iter.read_u16::<BigEndian>().unwrap(),
+            identifier: buf_be_iter.read_u16::<BigEndian>().unwrap(),
+            sequence_number: buf_be_iter.read_u16::<BigEndian>().unwrap(),
             data: [0; 56],
         };
         for data_offset in 0..message.data.len() {
-            let buf_offset = data_offset + 8;
-            message.data[data_offset] = safe_buf[buf_offset];
+            message.data[data_offset] = buf_be_iter.read_u8().unwrap();
         }
         return message;
     }
@@ -165,13 +150,13 @@ async fn main() -> std::io::Result<()> {
     .await;
 }
 
-// Pings a destination hostname.
+// Repeatedly pings a destination hostname.
 fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
-    // Set up the destination.
+    // Determine destination.
     let dest_ip = *lookup_host(&hostname).unwrap().first().unwrap();
     let dest_addr_v1 = SocketAddr::new(dest_ip, 0);
     let dest_addr_v2: SockAddr = dest_addr_v1.into();
-    // Set up the socket.
+    // Set up a socket.
     // This is a raw ICMPv4 socket, it will recv all ICMP traffic to this host.
     // We will apply filters to make it behave more reasonably.
     let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap();
@@ -204,20 +189,22 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
     //     libc::SO_ATTACH_FILTER,
     //     libc::sock_fprog { len: 1, &filters}
     // );
-    // Set up the ping timeout.
+    // Set the ping timeout.
     let ping_timeout = Duration::from_millis(config::PING_TIMEOUT_MSEC);
     socket.set_write_timeout(Some(ping_timeout)).unwrap();
     socket.set_read_timeout(Some(ping_timeout)).unwrap();
     // Set up this thread's ping metadata.
     let unique_threadlocal_id = rand::thread_rng().gen::<u16>();
-    println!("ID {} for pings to {}", unique_threadlocal_id, dest_ip);
     let mut sequence_number: u16 = 0;
     let mut recv_buf = [MaybeUninit::new(0); 1024];
+    // Log important details.
+    println!("ID {} for pings to {}", unique_threadlocal_id, dest_ip);
+    // Ping repeatedly.
     loop {
         sequence_number += 1;
         let start_time = Utc::now();
         let deadline = start_time + chrono_Duration::from_std(ping_timeout).unwrap();
-        // Construct an ICMP Ping header.
+        // Construct an ICMP Ping message.
         let request = IcmpEchoMessage::new(unique_threadlocal_id, sequence_number);
         // Send the ping.
         let send_res = socket.send_to(&request.serialize(), &dest_addr_v2);
@@ -225,20 +212,24 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
             Ok(_size) => {}
             Err(err) => eprintln!("Error while sending to {} - {:?}", dest_addr_v1, err),
         }
+        // Wait for the response.
+        // We are using a raw ICMP socket. Even with filters may see ICMPv4 Echo Replies meant for other threads or processes.
+        // Thus, we recv in a loop until our remote's response is the one we recv.
         let mut response_recvd: bool = false;
         while Utc::now() < deadline && !response_recvd {
-            // This raw ICMP socket will see all incoming ICMPv4 Echo Reply messages,
-            // so we need to recv in a loop until our remote's response is the one we see.
             let recv_res = socket.recv_from(&mut recv_buf);
             response_recvd = match recv_res {
                 Ok((size, origin_addr)) => {
                     let recv_origin = origin_addr.as_socket().unwrap();
                     if size != TOTAL_RECV_SIZE || recv_origin != dest_addr_v1 {
-                        // This response's doesn't match what we expect (size, remote address).
+                        // This response doesn't match what we expect (size, remote address).
                         // Drop this data and recv again.
                         false
                     } else {
-                        let response = IcmpEchoMessage::from(&recv_buf[IP_HEADER_SIZE..size]);
+                        let response_buf =
+                            &unsafe { MaybeUninit::slice_assume_init_ref(&recv_buf) }
+                                [IP_HEADER_SIZE..size];
+                        let response = IcmpEchoMessage::from(&response_buf);
                         let matching_response_found: bool = response.msg_type == 0
                             && response.code == 0
                             && response.identifier == unique_threadlocal_id
@@ -247,12 +238,12 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
                     }
                 }
                 Err(err) => {
-                    eprintln!("Error while recving - {:?}", err);
+                    eprintln!("Error while recving from {} - {:?}", dest_ip, err);
                     false
                 }
             }
         }
-        // Determine the time it's been.
+        // Determine how long the round trip took..
         let ping_duration = (Utc::now() - start_time).to_std().unwrap();
         // Store the ping duration.
         ping_data
