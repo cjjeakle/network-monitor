@@ -22,6 +22,7 @@ use std::time::Duration;
 mod config;
 
 struct PingData {
+    hostnames_in_order: Vec<String>,
     data: BTreeMap<String, BTreeMap<DateTime<Utc>, Duration>>,
 }
 impl PingData {
@@ -136,6 +137,7 @@ async fn main() -> std::io::Result<()> {
     let hostnames_to_ping: Vec<String> = std::env::args().skip(1).collect();
 
     let ping_data = Arc::new(Mutex::new(PingData {
+        hostnames_in_order: hostnames_to_ping.clone(),
         data: BTreeMap::new(),
     }));
 
@@ -301,17 +303,18 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     }
     </style>";
 
-    let locked_data = &ping_data.lock().unwrap().data;
+    let locked_ping_data = &ping_data.lock().unwrap();
 
     // Add hostname headings, each will get a column
     html += "<table><thead><tr>";
-    for hostname_data in locked_data {
-        html += format!("<th>{}</th>", hostname_data.0).as_str();
+    for hostname in &locked_ping_data.hostnames_in_order {
+        html += format!("<th>{}</th>", hostname).as_str();
     }
     html += "</tr></thead>";
     html += "<tbody><tr>";
     // Add the per-hostname data
-    for (_, hostname_data) in locked_data {
+    for hostname in &locked_ping_data.hostnames_in_order {
+        let hostname_data = &locked_ping_data.data[hostname.as_str()];
         // Label the per-hostname ping data fields
         html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
         // Rows of per-hostname ping data
