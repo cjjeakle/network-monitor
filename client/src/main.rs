@@ -106,8 +106,6 @@ impl IcmpEchoMessage {
     // Marshall out of a network byte order (big endian) buffer.
     fn from(buf_be: &[u8]) -> IcmpEchoMessage {
         let mut buf_be_iter = Cursor::new(buf_be);
-        // Words on x86 and x86_64 appear to be 16-bit.
-        // Thus, we swap every other byte as we de-serialize.
         let mut message = IcmpEchoMessage {
             msg_type: buf_be_iter.read_u8().unwrap(),
             code: buf_be_iter.read_u8().unwrap(),
