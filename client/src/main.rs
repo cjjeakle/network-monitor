@@ -132,11 +132,14 @@ const TOTAL_RECV_SIZE: usize = IP_HEADER_SIZE + std::mem::size_of::<IcmpEchoMess
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Skip the program name, all other command line args are hosts to ping.
+    let hostnames_to_ping: Vec<String> = std::env::args().skip(1).collect();
+
     let ping_data = Arc::new(Mutex::new(PingData {
         data: BTreeMap::new(),
     }));
 
-    for hostname in config::PING_DESTINATION {
+    for hostname in hostnames_to_ping {
         ping_data.lock().unwrap().add_hostname(&hostname);
         let hostname_threadlocal = hostname.to_string();
         let ping_data_threadlocal = ping_data.clone();

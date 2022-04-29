@@ -5,11 +5,15 @@ A utility to monitor network performance
 * [Install `rustup`](https://www.rust-lang.org/tools/install): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 * This project uses nightly features: `rustup install nightly`
 * Ensure you're up-to-date (`rustup update`)
-* Build the client:\
+* Build the client:
   ```
   cargo fmt --manifest-path=client/Cargo.toml && \
   cargo +nightly build --manifest-path=client/Cargo.toml && \
   sudo setcap cap_net_admin,cap_net_raw=eip client/target/debug/network-monitor
+  ```
+* Test the client:
+  ```
+  client/target/debug/network-monitor switch.lan pi3.local ping.projects.chrisjeakle.com
   ```
 
 ## Deploy

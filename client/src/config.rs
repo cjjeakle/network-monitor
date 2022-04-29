@@ -1,4 +1,3 @@
-pub const PING_DESTINATION: [&str; 2] = ["192.168.1.1", "ping.projects.chrisjeakle.com"];
 pub const SEC_BETWEEN_PINGS: u64 = 5;
 pub const PING_TIMEOUT_MSEC: u64 = 1_000;
 pub const MAX_ENTRIES_SAVED: usize = 30 * 24 * (60 / SEC_BETWEEN_PINGS as usize); // 30 days

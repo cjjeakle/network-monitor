@@ -7,7 +7,8 @@ Restart=always
 User=network-monitor
 Group=network-monitor
 WorkingDirectory=/usr/bin/network-monitor/client
-ExecStart=/usr/bin/network-monitor/client/network-monitor
+Environment="ARGS=switch.lan,pi3.local,ping.projects.chrisjeakle.com"
+ExecStart=/usr/bin/network-monitor/client/network-monitor $ARGS
 
 [Install]
 WantedBy=multi-user.target
