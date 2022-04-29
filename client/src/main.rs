@@ -60,28 +60,34 @@ impl IcmpEchoMessage {
             data: [0; 56],
         };
         // Set some values in the data, just for fun.
-        *message.data.first_mut().unwrap() = 'a' as u8;
-        *message.data.last_mut().unwrap() = 'z' as u8;
+        // A nice plus: this exercises the checksum's carry-out.
+        for i in 0..56 {
+            message.data[i] = 0xFF - i as u8;
+        }
         // Set the checksum.
         message.populate_checksum();
         return message;
     }
 
     // Takes the sum of this message as 16-bit words, adds back in any carry out,
-    // and return the 1's complement. Checksum must be set to 0 before calling this method.
+    // takes the 1's complement. Then sets the resulting value in the checksum field.
+    // http://www.faqs.org/rfcs/rfc1071.html is very helpful to understand the checksum's computation.
     fn populate_checksum(&mut self) {
-        // Compute the checksum (use a 32-bit value so overflow is graceful).
+        // Accumulate using a 32-bit variable so overflow is graceful.
         let mut sum: u32 = 0;
         // Take the sum of the message 16 bits at a time.
         let mut serialized = Cursor::new(self.serialize());
         while !serialized.is_empty() {
             sum += u32::from(serialized.read_u16::<BigEndian>().unwrap());
         }
-        // Add any overflow back in to the lower 16 bits.
-        let mut checksum: u16 = ((sum >> 16) + (sum & 0xffff)) as u16;
-        checksum += (sum >> 16) as u16;
+        // So long as there is overflow, add it back into the lower 16 bits.
+        while (sum >> 16) > 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
         // Take the 1's complement of the sum.
-        self.checksum = !checksum;
+        sum = !sum;
+        // Truncate to 16 bits.
+        self.checksum = sum as u16;
     }
 
     // Marshall into a buffer using network byte order (big endian).
