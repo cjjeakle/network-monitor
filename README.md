@@ -52,6 +52,10 @@ A utility to monitor network performance
     * Create a `system`  user, we have no need for interactive shell sessions or a home dir
 * Create a service to auto-start the client
   * `sudo cp client/systemd/network-monitor.service /etc/systemd/system/network-monitor.service`
+* Edit the service definition to ping the hosts you want to ping
+  * `sudo vim /etc/systemd/system/network-monitor.service`
+  * Edit the command line args at the end of the `ExecStart=` line under `[Service]`
+* Enable the service and start it
   * `sudo systemctl enable network-monitor.service && sudo systemctl start network-monitor.service`
   * Monitor service health:
     * `sudo systemctl status network-monitor.service`
