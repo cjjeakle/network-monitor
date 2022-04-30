@@ -8,18 +8,20 @@ use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use dns_lookup::lookup_host;
 use rand::Rng;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::cmp;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::mem::MaybeUninit;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 mod config;
+
+const IP_HEADER_SIZE: usize = 20;
 
 struct PingData {
     hostnames_in_order: Vec<String>,
@@ -128,8 +130,210 @@ impl IcmpEchoMessage {
     }
 }
 
-const IP_HEADER_SIZE: usize = 20;
-const TOTAL_RECV_SIZE: usize = IP_HEADER_SIZE + std::mem::size_of::<IcmpEchoMessage>();
+// Configures `socket` to only listen for ICMP Echo Reply messages.
+// Also applies a filter so `socket` will only listen for 64B ICMP Echo Reply messages from
+// `src_ip_v4` that are annotated with ICMP ID == `echo_id` and ICMP Code == 0.
+fn filter_icmp_replies(socket: &Socket, src_ip_v4: Ipv4Addr, icmp_msg_size: usize, echo_id: u16) {
+    // Filter so the socket will only recv Echo Reply ICMP messages.
+    // Echo Reply is type 0.
+    let icmp_types_to_listen_for_bitmask: libc::c_int = !(1 << 0/* ICMP Echo Reply */);
+    unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_RAW,
+            1, /* ICMP_FILTER */
+            &icmp_types_to_listen_for_bitmask as *const libc::c_int as *const libc::c_void,
+            4, /* Size of the bitmask, it's 32 bits */
+        );
+    }
+    // Use libc::BPF to filter yet further. Only recv 84B ICMP Echo Reply packets
+    // (20B IP header + 64B ICMP message) that are from `src_ip_v4` and annotated with `echo_id`.
+    //
+    // About BPF and Packet memory layout:
+    // https://www.kernel.org/doc/Documentation/networking/filter.txt
+    // https://en.wikipedia.org/wiki/Ethernet_frame
+    // https://en.wikipedia.org/wiki/IPv4#/media/File:IPv4_Packet-en.svg
+    //
+    // This bytecode was generated using `tcpdump`:
+    // sudo tcpdump -nni eth0 -dd icmp and src 192.168.1.1 and ip[3] == 84 and icmp[icmptype] == 0 and icmp[icmpcode] == 0 and icmp[4:2] == 0x00FF
+    // I used tcpdump's `-dd` output and regex-replaced it to be valid Rust:
+    // find: `\{ (.*), (.*), (.*), (.*) \},` -> replace: `libc::sock_filter { code: $1, jt: $2, jf:$3, k:$4 },`
+    // Note: you'll need to manually patch in variables like `dest_ip_v4` where appropriate.
+    //
+    // Annotated bytecode:
+    // Skip to the 2B EtherType field in the Ethernet header,
+    // if it's IPv4 (0x0800) continue, otherwise jump to exit.
+    // (000) ldh      [12]
+    // (001) jeq      #0x800           jt 2    jf 18
+    // Skip past the 14B Ethernet header (the 8B preamble doesn't count).
+    // Load 1B at offset 9 in the IP header (Protocol).
+    // If it's protocol 1 (ICMP) continue, otherwise exit.
+    // load 1 byte of the ID
+    // (002) ldb      [23]
+    // (003) jeq      #0x1             jt 4    jf 18
+    // Load 4B at offset 12 in the IP Header (Source Address).
+    // If it's equal to an IP of our choosing (192.168.1.1 in this case) continue, otherwise exit.
+    // (004) ld       [26]
+    // (005) jeq      #0xc0a80101      jt 6    jf 18
+    // Load 1B at offset 3 in the IP Header (the lower byte of Total Length).
+    // If the IP-layer message is 84B continue, otherwise exit.
+    // (006) ldb      [17]
+    // (007) jeq      #0x54            jt 8    jf 18
+    // Load the 2B "flags and fragment offset" field of the IP Header
+    // Use a mask to hide the flags in the upper 3 bits, and only leave the lower 13 bits set.
+    // If the masked fragment offset is non-zero we will exit, otherwise continue.
+    // (008) ldh      [20]
+    // (009) jset     #0x1fff          jt 20   jf 10
+    // I never did figure this out, but basically it loads a 1B IP header length into x.
+    // (010) ldxb     4*([14]&0xf)
+    // Add 14 to account for the Ethernet header.
+    // Load byte at offset 0 of the ICMP header, the ICMP Type.
+    // If it's 0 (Echo Reply) continue, otherwise exit.
+    // (011) ldb      [x + 14]
+    // (012) jeq      #0x0             jt 13   jf 18
+    // Load byte 2 of the ICMP header, the ICMP code. If it's 0 continue, otherwise exit.
+    // (013) ldb      [x + 15]
+    // (014) jeq      #0x0             jt 15   jf 18
+    // Load 2B at offset 4 in thee ICMP header, the ICMP ID.
+    // If it matches an ID of our choosing (0x00FF in this case) continue, otherwise exit.
+    // (015) ldh      [x + 18]
+    // (016) jeq      #0xff            jt 17   jf 18
+    // Indicate the criteria were fulfilled
+    // (017) ret      #262144
+    // Indicate we didn't fulfill the criteria
+    // (018) ret      #0
+    let mut bpf_bytecode: [libc::sock_filter; 19] = [
+        libc::sock_filter {
+            code: 0x28,
+            jt: 0,
+            jf: 0,
+            k: 0x0000000c,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 16,
+            k: 0x00000800,
+        },
+        libc::sock_filter {
+            code: 0x30,
+            jt: 0,
+            jf: 0,
+            k: 0x00000017,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 14,
+            k: 0x00000001,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0x0000001a,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 12,
+            k: u32::from_be_bytes(src_ip_v4.octets()),
+        },
+        libc::sock_filter {
+            code: 0x30,
+            jt: 0,
+            jf: 0,
+            k: 0x00000011,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 10,
+            k: (IP_HEADER_SIZE + icmp_msg_size).try_into().unwrap(),
+        },
+        libc::sock_filter {
+            code: 0x28,
+            jt: 0,
+            jf: 0,
+            k: 0x00000014,
+        },
+        libc::sock_filter {
+            code: 0x45,
+            jt: 8,
+            jf: 0,
+            k: 0x00001fff,
+        },
+        libc::sock_filter {
+            code: 0xb1,
+            jt: 0,
+            jf: 0,
+            k: 0x0000000e,
+        },
+        libc::sock_filter {
+            code: 0x50,
+            jt: 0,
+            jf: 0,
+            k: 0x0000000e,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 5,
+            k: 0x00000000,
+        },
+        libc::sock_filter {
+            code: 0x50,
+            jt: 0,
+            jf: 0,
+            k: 0x0000000f,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 3,
+            k: 0x00000000,
+        },
+        libc::sock_filter {
+            code: 0x48,
+            jt: 0,
+            jf: 0,
+            k: 0x00000012,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: echo_id.into(),
+        },
+        libc::sock_filter {
+            code: 0x6,
+            jt: 0,
+            jf: 0,
+            k: 0x00040000,
+        },
+        libc::sock_filter {
+            code: 0x6,
+            jt: 0,
+            jf: 0,
+            k: 0x00000000,
+        },
+    ];
+    let filter_program = libc::sock_fprog {
+        len: bpf_bytecode.len().try_into().unwrap(),
+        filter: bpf_bytecode.as_mut_ptr() as *mut libc::sock_filter,
+    };
+    let bpf_bytecode_size = bpf_bytecode.len() * std::mem::size_of::<libc::sock_filter>();
+    let filter_program_size = std::mem::size_of::<libc::sock_fprog>() + bpf_bytecode_size;
+    unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_ATTACH_FILTER,
+            &filter_program as *const libc::sock_fprog as *const libc::c_void,
+            filter_program_size.try_into().unwrap(),
+        );
+    }
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -140,6 +344,10 @@ async fn main() -> std::io::Result<()> {
         hostnames_in_order: hostnames_to_ping.clone(),
         data: BTreeMap::new(),
     }));
+
+    if hostnames_to_ping.is_empty() {
+        panic!("\nPlease provide hostnames to ping as command line args.\n");
+    }
 
     for hostname in hostnames_to_ping {
         ping_data.lock().unwrap().add_hostname(&hostname);
@@ -161,53 +369,45 @@ async fn main() -> std::io::Result<()> {
 
 // Repeatedly pings a destination hostname.
 fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
+    // Set up this thread's ping metadata.
+    let unique_threadlocal_id: u16 = rand::thread_rng().gen::<u16>();
+    let mut sequence_number: u16 = 0;
     // Determine destination.
-    let dest_ip = *lookup_host(&hostname).unwrap().first().unwrap();
-    let dest_addr_v1 = SocketAddr::new(dest_ip, 0);
-    let dest_addr_v2: SockAddr = dest_addr_v1.into();
+    // Only IPv4 is supported, the BPF filter and various header parsing depends on it.
+    let dest_ip_v4 = match *lookup_host(&hostname).unwrap().first().unwrap() {
+        IpAddr::V4(ip_v4) => ip_v4,
+        IpAddr::V6(ip_v6) => {
+            eprintln!(
+                "\nOnly IPv4 addresses are supported. Host {} resolves to {}, which is not an IPv4 Address.\n",
+                hostname,
+                ip_v6
+            );
+            // We can't just panic, it'll just crash the thread. Exit the whole process.
+            std::process::exit(0x1);
+        }
+    };
+    let dest_addr_v1 = SocketAddr::new(IpAddr::V4(dest_ip_v4), 0);
+    let dest_addr_v2: socket2::SockAddr = dest_addr_v1.into();
     // Set up a socket.
     // This is a raw ICMPv4 socket, it will recv all ICMP traffic to this host.
     // We will apply filters to make it behave more reasonably.
     let socket = Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).unwrap();
-    // Filter so this socket will only recv Echo Reply ICMP messages.
-    // Echo Reply is type 0.
-    let icmp_types_to_listen_for_bitmask: libc::c_int = !(1 << 0);
-    unsafe {
-        libc::setsockopt(
-            socket.as_raw_fd(),
-            libc::SOL_RAW,
-            1, /* ICMP_FILTER */
-            &icmp_types_to_listen_for_bitmask as *const libc::c_int as *const libc::c_void,
-            4, /* Size of the bitmask, it's 32 bits */
-        );
-    }
-    // Use BPF to filter yet further. Only recv 84B ICMP Echo Reply packets annotated with our
-    // thread's `unique_threadlocal_id`.
-    // https://www.kernel.org/doc/Documentation/networking/filter.txt
-    // Generate BPF bytecode using `tcpdump`:
-    // `sudo tcpdump -nni eth0 -dd icmp and src 192.168.1.1 and ip[3] == 84 and icmp[icmptype] == 0 and icmp[icmpcode] == 0`
-    // let filters: [libc::sock_filter; 1] =[{
-    //     code: 0 /* ICMP Echo Reply */,
-    //     jt: /* jump true. */,
-    //     jf: /* jump false. */,
-    //     k: /* Generic field. */,
-    // }]
-    // libc::setsockopt(
-    //     socket.as_raw_fd(),
-    //     libc::SOL_SOCKET,
-    //     libc::SO_ATTACH_FILTER,
-    //     libc::sock_fprog { len: 1, &filters}
-    // );
+    // Apply filters so we only recv and process relevant packets.
+    filter_icmp_replies(
+        &socket,
+        dest_ip_v4,
+        std::mem::size_of::<IcmpEchoMessage>(),
+        unique_threadlocal_id,
+    );
     // Set the ping timeout.
     let ping_timeout = Duration::from_millis(config::PING_TIMEOUT_MSEC);
     socket.set_write_timeout(Some(ping_timeout)).unwrap();
     socket.set_read_timeout(Some(ping_timeout)).unwrap();
-    // Set up this thread's ping metadata.
-    let unique_threadlocal_id = rand::thread_rng().gen::<u16>();
-    let mut sequence_number: u16 = 0;
-    let mut recv_buf = [MaybeUninit::new(0); 1024];
     // Log important details.
-    println!("ID {} for pings to {}", unique_threadlocal_id, dest_ip);
+    println!(
+        "Pinging host {} (IP: {}) using ID {}",
+        hostname, dest_ip_v4, unique_threadlocal_id
+    );
     // Ping repeatedly.
     loop {
         sequence_number += 1;
@@ -219,40 +419,33 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
         let send_res = socket.send_to(&request.serialize(), &dest_addr_v2);
         match send_res {
             Ok(_size) => {}
-            Err(err) => eprintln!("Error while sending to {} - {:?}", dest_addr_v1, err),
+            Err(err) => eprintln!("Error while sending to {} - {:?}", dest_ip_v4, err),
         }
         // Wait for the response.
-        // We are using a raw ICMP socket. Even with filters may see ICMPv4 Echo Replies meant for other threads or processes.
-        // Thus, we recv in a loop until our remote's response is the one we recv.
+        // We are using a raw ICMP socket. Even with filters may see ICMPv4 Echo Replies meant for other
+        // threads or processes. Thus, we recv in a loop until our remote's response is the one we recv.
         let mut response_recvd: bool = false;
         while Utc::now() < deadline && !response_recvd {
+            let mut recv_buf = [MaybeUninit::new(0); 1024];
             let recv_res = socket.recv_from(&mut recv_buf);
             response_recvd = match recv_res {
-                Ok((size, origin_addr)) => {
-                    let recv_origin = origin_addr.as_socket().unwrap();
-                    if size != TOTAL_RECV_SIZE || recv_origin != dest_addr_v1 {
-                        // This response doesn't match what we expect (size, remote address).
-                        // Drop this data and recv again.
-                        false
-                    } else {
-                        let response_buf =
-                            &unsafe { MaybeUninit::slice_assume_init_ref(&recv_buf) }
-                                [IP_HEADER_SIZE..size];
-                        let response = IcmpEchoMessage::from(&response_buf);
-                        let matching_response_found: bool = response.msg_type == 0
-                            && response.code == 0
-                            && response.identifier == unique_threadlocal_id
-                            && response.sequence_number == sequence_number;
-                        matching_response_found
-                    }
+                Ok((size, _origin_addr)) => {
+                    let response_buf = &unsafe { MaybeUninit::slice_assume_init_ref(&recv_buf) }
+                        [IP_HEADER_SIZE..size];
+                    let response = IcmpEchoMessage::from(&response_buf);
+                    let matching_response_found: bool = response.msg_type == 0
+                        && response.code == 0
+                        && response.identifier == unique_threadlocal_id
+                        && response.sequence_number == sequence_number;
+                    matching_response_found
                 }
                 Err(err) => {
-                    eprintln!("Error while recving from {} - {:?}", dest_ip, err);
+                    eprintln!("Error while recving from {} - {:?}", dest_ip_v4, err);
                     false
                 }
             }
         }
-        // Determine how long the round trip took..
+        // Determine how long the round trip took.
         let ping_duration = (Utc::now() - start_time).to_std().unwrap();
         // Store the ping duration.
         ping_data
@@ -273,7 +466,7 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
 async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     let mut html = String::new();
 
-    // Style the tables
+    // Style the tables.
     html += "<style>
     * {
         // Reset default margin & padding
@@ -303,51 +496,58 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     }
     </style>";
 
-    let locked_ping_data = &ping_data.lock().unwrap();
-
-    // Add hostname headings, each will get a column
+    // Create a table to display the data.
     html += "<table><thead><tr>";
-    for hostname in &locked_ping_data.hostnames_in_order {
-        html += format!("<th>{}</th>", hostname).as_str();
-    }
-    html += "</tr></thead>";
-    html += "<tbody><tr>";
-    // Add the per-hostname data
-    for hostname in &locked_ping_data.hostnames_in_order {
-        let hostname_data = &locked_ping_data.data[hostname.as_str()];
-        // Label the per-hostname ping data fields
-        html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
-        // Rows of per-hostname ping data
-        html += "<tbody>";
-        for (timestamp, duration) in hostname_data.iter().rev() {
-            let tens_of_ms = duration.as_millis() / 10;
-            // Print a bar for every 10 ms, with a max of 10 bars
-            let mut num_bars = cmp::min(tens_of_ms, 10);
-            let mut magnitude_bars = "".to_string();
-            while num_bars > 0 {
-                magnitude_bars += "█";
-                num_bars -= 1;
-            }
-            // Anything greater than 100 MS is "off the charts", annotate that
-            if tens_of_ms > 10 {
-                magnitude_bars += "▓▒░";
-            }
-            let local_timestamp = DateTime::<Local>::from(timestamp.clone());
-            html += format!(
-                "<tr><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
-                local_timestamp.month(),
-                local_timestamp.day(),
-                local_timestamp.hour12().1,
-                local_timestamp.minute(),
-                local_timestamp.second(),
-                if local_timestamp.hour12().0 { "PM" } else { "AM" },
-                duration.as_secs_f64() * 1000.0,
-                magnitude_bars
-            )
-            .as_str();
+
+    // Use a scope to drop the lock as soon as possible.
+    {
+        let locked_ping_data = &ping_data.lock().unwrap();
+
+        // Add hostname headings, each will get a column.
+        for hostname in &locked_ping_data.hostnames_in_order {
+            html += format!("<th>{}</th>", hostname).as_str();
         }
-        html += "</tbody></table></td>"
+        html += "</tr></thead>";
+        html += "<tbody><tr>";
+        // Add the per-host data.
+        for hostname in &locked_ping_data.hostnames_in_order {
+            let hostname_data = &locked_ping_data.data[hostname.as_str()];
+            // Label the per-host ping data fields.
+            html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
+            // Rows of per-host ping data.
+            html += "<tbody>";
+            for (timestamp, duration) in hostname_data.iter().rev() {
+                let tens_of_ms = duration.as_millis() / 10;
+                // Print a bar for every 10 ms, with a max of 10 bars.
+                let mut num_bars = cmp::min(tens_of_ms, 10);
+                let mut magnitude_bars = "".to_string();
+                while num_bars > 0 {
+                    magnitude_bars += "█";
+                    num_bars -= 1;
+                }
+                // Anything greater than 100 MS is "off the charts", annotate that.
+                if tens_of_ms > 10 {
+                    magnitude_bars += "▓▒░";
+                }
+                let local_timestamp = DateTime::<Local>::from(timestamp.clone());
+                // Add a row of ping data to the table.
+                html += format!(
+                    "<tr><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
+                    local_timestamp.month(),
+                    local_timestamp.day(),
+                    local_timestamp.hour12().1,
+                    local_timestamp.minute(),
+                    local_timestamp.second(),
+                    if local_timestamp.hour12().0 { "PM" } else { "AM" },
+                    duration.as_secs_f64() * 1000.0,
+                    magnitude_bars
+                )
+                .as_str();
+            }
+            html += "</tbody></table></td>"
+        }
     }
+
     html += "</tbody>";
     html += "</table>";
 
