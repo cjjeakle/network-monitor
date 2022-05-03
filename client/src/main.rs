@@ -471,13 +471,13 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
         border: 1px solid lightgrey;
     }
     table tr .NewDay {
-        border-bottom: 8px solid black;
+        border-top: 8px solid black;
     }
     table tr .NewHour {
-        border-bottom: 4px solid black;
+        border-top: 4px solid black;
     }
     table tr .NewMinute {
-        border-bottom: 2px solid black;
+        border-top: 2px solid black;
     }
     </style>";
 
