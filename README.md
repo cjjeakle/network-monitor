@@ -65,6 +65,7 @@ A utility to monitor network performance
 #### Updates
 Binary update script:
 ```
+git pull && \
 cargo +nightly build --release --manifest-path=client/Cargo.toml && \
 sudo systemctl stop network-monitor.service && \
 sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/ && \
@@ -73,3 +74,7 @@ sudo systemctl start network-monitor.service && \
 sudo getcap /usr/bin/network-monitor/client/network-monitor && \
 sudo systemctl status network-monitor.service
 ```
+
+#### Screenshots
+The UI:
+![The client-side web UI](./client-ui-screenshot.png)
