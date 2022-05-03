@@ -341,18 +341,20 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
     let mut sequence_number: u16 = 0;
     // Determine destination.
     // Only IPv4 is supported, the BPF filter and various header parsing depends on it.
-    let dest_ip_v4 = match *lookup_host(&hostname).unwrap().first().unwrap() {
-        IpAddr::V4(ip_v4) => ip_v4,
-        IpAddr::V6(ip_v6) => {
-            eprintln!(
-                "\nOnly IPv4 addresses are supported. Host {} resolves to {}, which is not an IPv4 Address.\n",
-                hostname,
-                ip_v6
-            );
-            // We can't just panic, it'll just crash the thread. Exit the whole process.
-            std::process::exit(0x1);
-        }
-    };
+    let dest_ip_v4 = *lookup_host(&hostname)
+        .unwrap()
+        .into_iter()
+        .filter(|ip| match ip {
+            IpAddr::V4(_) => true,
+            _ => false,
+        })
+        .map(|ip| match ip {
+            IpAddr::V4(ip_v4) => ip_v4,
+            _ => unreachable!(),
+        })
+        .collect::<Vec<Ipv4Addr>>()
+        .first()
+        .unwrap();
     let dest_addr_v1 = SocketAddr::new(IpAddr::V4(dest_ip_v4), 0);
     let dest_addr_v2: socket2::SockAddr = dest_addr_v1.into();
     // Set up a socket.
@@ -452,6 +454,7 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     table {
         width:100%;
         margin: 0 auto;
+        border-collapse: collapse;
     }
     table {
         color: black;
@@ -466,6 +469,15 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
         vertical-align: top;
         padding: .5em;
         border: 1px solid lightgrey;
+    }
+    table tr .NewDay {
+        border-bottom: 8px solid black;
+    }
+    table tr .NewHour {
+        border-bottom: 4px solid black;
+    }
+    table tr .NewMinute {
+        border-bottom: 2px solid black;
     }
     </style>";
 
@@ -485,6 +497,11 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
         // Add the per-host data.
         for hostname in &locked_ping_data.hostnames_in_order {
             let hostname_data = &locked_ping_data.data[hostname.as_str()];
+            let initial_timestamp =
+                DateTime::<Local>::from(hostname_data.last_key_value().unwrap().0.clone());
+            let mut prev_day = initial_timestamp.day();
+            let mut prev_hour = initial_timestamp.hour();
+            let mut prev_minute = initial_timestamp.minute();
             // Label the per-host ping data fields.
             html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
             // Rows of per-host ping data.
@@ -503,9 +520,26 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
                     magnitude_bars += "▓▒░";
                 }
                 let local_timestamp = DateTime::<Local>::from(timestamp.clone());
+                // Add some style to clearly delineate days, minutes, hours
+                let style = if local_timestamp.day() != prev_day {
+                    prev_day = local_timestamp.day();
+                    prev_hour = local_timestamp.hour();
+                    prev_minute = local_timestamp.minute();
+                    "class=\"NewDay\""
+                } else if local_timestamp.hour() != prev_hour {
+                    prev_hour = local_timestamp.hour();
+                    prev_minute = local_timestamp.minute();
+                    "class=\"NewHour\""
+                } else if local_timestamp.minute() != prev_minute {
+                    prev_minute = local_timestamp.minute();
+                    "class=\"NewMinute\""
+                } else {
+                    ""
+                };
                 // Add a row of ping data to the table.
                 html += format!(
-                    "<tr><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
+                    "<tr {}><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
+                    style,
                     local_timestamp.month(),
                     local_timestamp.day(),
                     local_timestamp.hour12().1,
