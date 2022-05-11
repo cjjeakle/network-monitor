@@ -462,7 +462,9 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
     let mut html = String::new();
 
     // Style the tables.
-    html += "<style>
+    html += "
+    <meta name=\"viewport\" content=\"width=1200, initial-scale=1\">
+    <style>
     * {
         // Reset default margin & padding
         margin:0;
@@ -471,8 +473,12 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
     html,body {
         position:relative;
     }
+    .root {
+        table-layout: fixed;
+        width:1200px;
+    }
     table {
-        width:100%;
+        width: 100%;
         margin: 0 auto;
         border-collapse: collapse;
     }
@@ -523,7 +529,7 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
     .as_str();
 
     // Create a table to display the data.
-    html += "<table><thead><tr>";
+    html += "<table class=\"root\"><thead><tr>";
 
     // Use a scope so we drop the lock as soon as possible.
     {
