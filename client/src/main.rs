@@ -490,11 +490,14 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
         padding: .5em;
         border: 1px solid lightgrey;
     }
+    table tr .TimedOut {
+        color: red;
+    }
     table tr .NewDay {
-        border-top: 8px solid black;
+        border-top: 20px solid black;
     }
     table tr .NewHour {
-        border-top: 4px solid black;
+        border-top: 10px solid black;
     }
     table tr .NewMinute {
         border-top: 2px solid black;
@@ -565,25 +568,30 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
                 }
                 let local_timestamp = DateTime::<Local>::from(timestamp.clone());
                 // Add some style to clearly delineate days, minutes, hours
-                let style = if local_timestamp.day() != prev_day {
+                let mut class = "class=\"".to_string();
+                class += if local_timestamp.day() != prev_day {
                     prev_day = local_timestamp.day();
                     prev_hour = local_timestamp.hour();
                     prev_minute = local_timestamp.minute();
-                    "class=\"NewDay\""
+                    " NewDay "
                 } else if local_timestamp.hour() != prev_hour {
                     prev_hour = local_timestamp.hour();
                     prev_minute = local_timestamp.minute();
-                    "class=\"NewHour\""
+                    " NewHour "
                 } else if local_timestamp.minute() != prev_minute {
                     prev_minute = local_timestamp.minute();
-                    "class=\"NewMinute\""
+                    " NewMinute "
                 } else {
                     ""
                 };
+                if duration >= &Duration::from_millis(config::PING_TIMEOUT_MSEC) {
+                    class += " TimedOut ";
+                }
+                class += "\"";
                 // Add a row of ping data to the table.
                 html += format!(
                     "<tr {}><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
-                    style,
+                    class,
                     local_timestamp.month(),
                     local_timestamp.day(),
                     local_timestamp.hour12().1,
