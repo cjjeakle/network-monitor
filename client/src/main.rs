@@ -2,15 +2,19 @@
 #![feature(map_first_last)]
 #![feature(maybe_uninit_slice)]
 
-use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer};
+use actix_web::{
+    http::header::ContentType, web, web::Query, App, HttpRequest, HttpResponse, HttpServer,
+};
 use byteorder::{BigEndian, ReadBytesExt};
 use chrono::Duration as chrono_Duration;
 use chrono::{DateTime, Datelike, Local, Timelike, Utc};
 use dns_lookup::lookup_host;
+use parse_duration::parse;
 use rand::Rng;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::cmp;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -438,7 +442,23 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
 }
 
 // The web UI.
-async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
+const START_OFFSET_PARAM: &str = "start_offset";
+const HOW_MUCH_DATA: &str = "how_much_data";
+async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
+    let cur_time = Utc::now();
+    let offset_params = Query::<HashMap<String, String>>::from_query(req.query_string()).unwrap();
+    let start_offset = match offset_params.get(START_OFFSET_PARAM) {
+        Some(start_offset) => parse(start_offset.as_str()).unwrap(),
+        None => Duration::from_secs(0), // Default to now.
+    };
+    let newest_timestamp_in_scope = cur_time - chrono_Duration::from_std(start_offset).unwrap();
+    let how_much_data = match offset_params.get(HOW_MUCH_DATA) {
+        Some(end_offset) => parse(end_offset.as_str()).unwrap(),
+        None => Duration::from_secs(60 * 60 * 6), // Default to 6 hours of data.
+    };
+    let oldest_timestamp_in_scope =
+        newest_timestamp_in_scope - chrono_Duration::from_std(how_much_data).unwrap();
+
     let mut html = String::new();
 
     // Style the tables.
@@ -481,10 +501,28 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
     }
     </style>";
 
+    let delta = Duration::from_secs(60 * 60 * 6);
+    html += format!(
+        "<a style=\"float: left\" href=\"/?start_offset={:?}&how_much_data={:?}\">❮ newer data</a>",
+        if start_offset < delta {
+            Duration::from_secs(0)
+        } else {
+            start_offset - delta
+        },
+        how_much_data
+    )
+    .as_str();
+    html += format!(
+        "<a style=\"float: right\" href=\"/?start_offset={:?}&how_much_data={:?}\">older data ❯</a>",
+        (start_offset + delta),
+        how_much_data
+    )
+    .as_str();
+
     // Create a table to display the data.
     html += "<table><thead><tr>";
 
-    // Use a scope to drop the lock as soon as possible.
+    // Use a scope so we drop the lock as soon as possible.
     {
         let locked_ping_data = &ping_data.lock().unwrap();
 
@@ -496,17 +534,23 @@ async fn index(ping_data: web::Data<Arc<Mutex<PingData>>>) -> HttpResponse {
         html += "<tbody><tr>";
         // Add the per-host data.
         for hostname in &locked_ping_data.hostnames_in_order {
-            let hostname_data = &locked_ping_data.data[hostname.as_str()];
-            let initial_timestamp =
-                DateTime::<Local>::from(hostname_data.last_key_value().unwrap().0.clone());
+            let initial_timestamp = DateTime::<Local>::from(newest_timestamp_in_scope);
             let mut prev_day = initial_timestamp.day();
             let mut prev_hour = initial_timestamp.hour();
             let mut prev_minute = initial_timestamp.minute();
+            // Iterate the range in newest (highest datetime) to oldest order.
+            // Filter to only data in the time-frame we want.
+            let hostname_data_iter = locked_ping_data.data[hostname.as_str()]
+                .range(..newest_timestamp_in_scope)
+                .rev()
+                .filter(|data| {
+                    data.0 >= &oldest_timestamp_in_scope && data.0 <= &newest_timestamp_in_scope
+                });
             // Label the per-host ping data fields.
             html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
             // Rows of per-host ping data.
             html += "<tbody>";
-            for (timestamp, duration) in hostname_data.iter().rev() {
+            for (timestamp, duration) in hostname_data_iter {
                 let tens_of_ms = duration.as_millis() / 10;
                 // Print a bar for every 10 ms, with a max of 10 bars.
                 let mut num_bars = cmp::min(tens_of_ms, 10);
