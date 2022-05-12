@@ -474,11 +474,12 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
         position:relative;
     }
     .root {
-        table-layout: fixed;
         width:1200px;
     }
     table {
         width: 100%;
+        table-layout: fixed;
+        overflow: hidden;
         margin: 0 auto;
         border-collapse: collapse;
     }
@@ -492,7 +493,9 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
     }
     table th,
     table td {
-        vertical-align: top;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: clip;
         padding: .5em;
         border: 1px solid lightgrey;
     }
@@ -556,7 +559,7 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
                     data.0 >= &oldest_timestamp_in_scope && data.0 <= &newest_timestamp_in_scope
                 });
             // Label the per-host ping data fields.
-            html += "<td><table><thead><tr><th>timestamp</th><th>duration</th><th>magnitude</th></tr></thead>";
+            html += "<td><table><thead><tr><th style=\"width:40%\">timestamp</th><th style=\"width:25%\">duration</th><th style=\"width:35%\">magnitude</th></tr></thead>";
             // Rows of per-host ping data.
             html += "<tbody>";
             for (timestamp, duration) in hostname_data_iter {
@@ -567,10 +570,6 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
                 while num_bars > 0 {
                     magnitude_bars += "█";
                     num_bars -= 1;
-                }
-                // Anything greater than 100 MS is "off the charts", annotate that.
-                if tens_of_ms > 10 {
-                    magnitude_bars += "▓▒░";
                 }
                 let local_timestamp = DateTime::<Local>::from(timestamp.clone());
                 // Add some style to clearly delineate days, minutes, hours
@@ -596,7 +595,7 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
                 class += "\"";
                 // Add a row of ping data to the table.
                 html += format!(
-                    "<tr {}><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td>|{:_<10}</td></tr>",
+                    "<tr {}><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td style=\"font-family: monospace; font-size:1.25em\">⎹{:_<10}</td></tr>",
                     class,
                     local_timestamp.month(),
                     local_timestamp.day(),
