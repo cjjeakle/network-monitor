@@ -595,7 +595,7 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
                 class += "\"";
                 // Add a row of ping data to the table.
                 html += format!(
-                    "<tr {}><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td style=\"font-family: monospace; font-size:1.25em\">⎹{:_<10}</td></tr>",
+                    "<tr {}><td>{:02}-{:02} {:02}:{:02}:{:02} {}</td><td>{:_>6.1} ms</td><td style=\"font-family: monospace;\">⎹{:_<10}</td></tr>",
                     class,
                     local_timestamp.month(),
                     local_timestamp.day(),
