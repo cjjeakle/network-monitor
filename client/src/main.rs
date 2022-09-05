@@ -412,8 +412,11 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
                         && response.sequence_number == sequence_number;
                     if !matching_response_found {
                         eprintln!(
-                            "An unexpected message got through the BPF filter: {:?}",
-                            response
+                            "An unexpected message got through the BPF filter: {:?}. Expected code={} id={} seq={}.",
+                            response,
+                            0,
+                            unique_threadlocal_id,
+                            sequence_number
                         );
                     }
                     matching_response_found

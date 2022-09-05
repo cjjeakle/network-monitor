@@ -13,7 +13,7 @@ A utility to monitor network performance
   ```
 * Test the client:
   ```
-  client/target/debug/network-monitor switch.lan pi3.local ping.projects.chrisjeakle.com
+  client/target/debug/network-monitor router.local ping.projects.chrisjeakle.com
   ```
 
 ## Deploy
