@@ -19,8 +19,9 @@
   </style>
   <script>
     function ping_test() {
+      document.getElementById("result").innerText = "...";
       const start_time = new Date().getTime();
-      fetch("ping/index.html", {
+      fetch("ping/data.txt", {
           mode: "no-cors",
           cache: "no-cache",
         }).then(async (result) => {
