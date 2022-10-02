@@ -3,12 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=400">
-    <title>Ping test</title>
+    <title>Measure latency</title>
   </head>
   <body>
-      <p>The ping took: <var id="result"></var> ms.</p>
-      <p><em>Note: this site times a full HTTP request, there's some overhead included in the ping time.</em></p>
+      <p>HTTP request latency: <var id="result">...</var> ms.</p>
+      <p><em>Note: this site times HTTP requests rather than ICMP pings, so there's some overhead included in the reported durations.</em></p>
       <button onclick="javascript:ping_test();">Test again</button>
+      <p style="position: fixed; bottom:0">
+        By <a href="http://www.chrisjeakle.com"> Chris Jeakle</a>
+        &nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;
+        <a href="https://github.com/cjjeakle/network-monitor/tree/main/server">View project source</a>
+      </p> 
   </body>
   <style>
     body {
@@ -19,16 +24,22 @@
   </style>
   <script>
     function ping_test() {
-      document.getElementById("result").innerText = "...";
+        time_request("ping/data.txt", "result");
+    }
+    function time_request(url, output_id) {
+      document.getElementById(output_id).innerText = "...";
       const start_time = new Date().getTime();
-      fetch("ping/data.txt", {
+      fetch(url, {
           mode: "no-cors",
           cache: "no-cache",
         }).then(async (result) => {
           const elapsed_time = new Date().getTime() - start_time;
-          document.getElementById("result").innerText = elapsed_time;
+          document.getElementById(output_id).innerText = elapsed_time;
       });
     }
-    setTimeout(ping_test, 250);
+    // Make a couple requests to force the RTT to converge to something useful.
+    setTimeout(ping_test, 500);
+    setTimeout(ping_test, 1000);
+    setTimeout(ping_test, 1500);
   </script>
 </html>
