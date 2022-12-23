@@ -1,5 +1,4 @@
 #![feature(cursor_remaining)]
-#![feature(map_first_last)]
 #![feature(maybe_uninit_slice)]
 
 use actix_web::{
