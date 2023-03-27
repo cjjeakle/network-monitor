@@ -1,57 +1,55 @@
 # Network Monitor
-A utility to monitor network performance
+Utility to help monitor and assess network performance
 
 ## Build
 * [Install `rustup`](https://www.rust-lang.org/tools/install): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 * This project uses nightly features: `rustup install nightly`
 * Ensure you're up-to-date (`rustup update`)
-* Build the client:
+* Build the LAN tool monitor:
   ```
-  cargo fmt --manifest-path=client/Cargo.toml && \
-  cargo +nightly build --manifest-path=client/Cargo.toml && \
-  sudo setcap cap_net_admin,cap_net_raw=eip client/target/debug/network-monitor
+  cargo fmt --manifest-path=LAN/Cargo.toml && \
+  cargo +nightly build --manifest-path=LAN/Cargo.toml && \
+  sudo setcap cap_net_admin,cap_net_raw=eip LAN/target/debug/network-monitor
   ```
-* Test the client:
+* Test the LAN-hosted performance monitor:
   ```
-  client/target/debug/network-monitor router.local ping.projects.chrisjeakle.com
+  LAN/target/debug/network-monitor router.local ping.projects.chrisjeakle.com
   ```
+  * By default the UI is available at http://0.0.0.0:8180
 
 ## Deploy
 
-### Server Side
+### Web hosted latency test
 * Set up the web pages:
   * On the server: `ssh root@projects.chrisjeakle.com 'mkdir /var/www/html/ping/'`
-  * `scp -pr /server/html root@projects.chrisjeakle.com:/var/www/html/ping/` on the server
+  * Upload the latency test page to the server: `scp -pr WAN/html root@projects.chrisjeakle.com:/var/www/html/ping/`
 * Configure nginx:
-  * `scp server/nginx/ping.conf root@projects.chrisjeakle.com:/etc/nginx/conf.d/ping.conf`
+  * `scp WAN/nginx/ping.conf root@projects.chrisjeakle.com:/etc/nginx/conf.d/ping.conf`
   * On the server: `ssh root@projects.chrisjeakle.com 'service nginx reload'`
 * Test the config
-  * `ping -c 4 ping.projects.chrisjeakle.com`
+  * Ensure ICMP pings work (so the LAN tool can ping this WAN destination): `ping -c 4 ping.projects.chrisjeakle.com`
   * Ensure there's no redirects: `curl -H 'Cache-Control: no-cache' http://ping.projects.chrisjeakle.com/ping/ -I -k`
   * `curl http://ping.projects.chrisjeakle.com/ping/`
   * Visit in a browser: http://ping.projects.chrisjeakle.com/
 
-### Client Side
+### LAN ping monitoring tool
 
 #### Initial Deploy
-* SSH into the client device
-* Create an ssh key on the target device
-  * `ssh-keygen -t rsa -b 4096 -C "pi@pi4.local" -f ~/.ssh/id_rsa`
-* `cat ~/.ssh/id_rsa.pub` and add it as a readonly deploy key for the repo
-* Configure the application by editing `client/config.rs`
-* Build the client
-  * `cargo +nightly build --release --manifest-path=client/Cargo.toml`
+* SSH into a LAN device to host the software
+* Configure the application by editing `LAN/config.rs`
+* Build the application
+  * `cargo +nightly build --release --manifest-path=LAN/Cargo.toml`
+* Copy the binary to the appropriate folder on the LAN device
+  * `sudo mkdir -p /usr/bin/network-monitor/`
+  * `sudo cp LAN/target/release/network-monitor /usr/bin/network-monitor/network-monitor`
 * Apply capabilities so the program is permitted to create raw sockets
-  * `sudo setcap cap_net_admin,cap_net_raw=eip client/target/release/network-monitor`
-  * Verify it worked using: `getcap /usr/bin/network-monitor/client/network-monitor`
-* Copy the client binary to the appropriate folder on the client device
-  * `sudo mkdir -p /usr/bin/network-monitor/client/`
-  * `sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/`
+  * `sudo setcap cap_net_admin,cap_net_raw=eip /usr/bin/network-monitor/network-monitor`
+  * Verify it worked using: `getcap /usr/bin/network-monitor/network-monitor`
 * Create a new non-root user to run the service
   * `sudo useradd --system network-monitor`
     * Create a `system`  user, we have no need for interactive shell sessions or a home dir
-* Create a service to auto-start the client
-  * `sudo cp client/systemd/network-monitor.service /etc/systemd/system/network-monitor.service`
+* Create a service to auto-start the application
+  * `sudo cp LAN/systemd/network-monitor.service /etc/systemd/system/network-monitor.service`
 * Edit the service definition to ping the hosts you want to ping
   * `sudo vim /etc/systemd/system/network-monitor.service`
   * Edit the command line args at the end of the `ExecStart=` line under `[Service]`
@@ -66,15 +64,15 @@ A utility to monitor network performance
 Binary update script:
 ```
 git pull && \
-cargo +nightly build --release --manifest-path=client/Cargo.toml && \
+cargo +nightly build --release --manifest-path=LAN/Cargo.toml && \
 sudo systemctl stop network-monitor.service && \
-sudo cp client/target/release/network-monitor /usr/bin/network-monitor/client/ && \
-sudo setcap cap_net_admin,cap_net_raw=eip /usr/bin/network-monitor/client/network-monitor && \
+sudo cp LAN/target/release/network-monitor /usr/bin/network-monitor/ && \
+sudo setcap cap_net_admin,cap_net_raw=eip /usr/bin/network-monitor/network-monitor && \
 sudo systemctl start network-monitor.service && \
-sudo getcap /usr/bin/network-monitor/client/network-monitor && \
+sudo getcap /usr/bin/network-monitor/network-monitor && \
 sudo systemctl status network-monitor.service
 ```
 
 #### Screenshots
 The UI:
-![The client-side web UI](./client-ui-screenshot.png)
+![The LAN-side web UI](./LAN-ui-screenshot.png)

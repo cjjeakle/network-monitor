@@ -1,0 +1,14 @@
+[Unit]
+Description=Network Monitor Ping Logger
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+User=network-monitor
+Group=network-monitor
+WorkingDirectory=/usr/bin/network-monitor/
+ExecStart=/usr/bin/network-monitor/network-monitor router.local ping.projects.chrisjeakle.com ping.projects-west.chrisjeakle.com
+
+[Install]
+WantedBy=multi-user.target
