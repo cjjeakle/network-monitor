@@ -1,17 +1,17 @@
 # Network Monitor
-Utility to help monitor and assess network performance
+A utility to help monitor and assess network performance
 
 ## Build
 * [Install `rustup`](https://www.rust-lang.org/tools/install): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 * This project uses nightly features: `rustup install nightly`
 * Ensure you're up-to-date (`rustup update`)
-* Build the LAN tool monitor:
+* Build the LAN-side application:
   ```
   cargo fmt --manifest-path=LAN/Cargo.toml && \
   cargo +nightly build --manifest-path=LAN/Cargo.toml && \
   sudo setcap cap_net_admin,cap_net_raw=eip LAN/target/debug/network-monitor
   ```
-* Test the LAN-hosted performance monitor:
+* Test the LAN-side application:
   ```
   LAN/target/debug/network-monitor router.local ping.projects.chrisjeakle.com
   ```
