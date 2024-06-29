@@ -13,7 +13,7 @@ A utility to help monitor and assess network performance
   ```
 * Test the LAN-side application:
   ```
-  LAN/target/debug/network-monitor router.local ping.projects.chrisjeakle.com
+  LAN/target/debug/network-monitor 192.168.1.1 ping.projects.chrisjeakle.com
   ```
   * By default the UI is available at http://0.0.0.0:8180
 
