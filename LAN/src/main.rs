@@ -515,20 +515,19 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
     }
     </style>";
 
-    let delta = Duration::from_secs(60 * 60 * 6);
     html += format!(
         "<a style=\"float: left\" href=\"/?start_offset={:?}&how_much_data={:?}\">❮ newer data</a>",
-        if start_offset < delta {
+        if start_offset < how_much_data {
             Duration::from_secs(0)
         } else {
-            start_offset - delta
+            start_offset - how_much_data
         },
         how_much_data
     )
     .as_str();
     html += format!(
         "<a style=\"float: right\" href=\"/?start_offset={:?}&how_much_data={:?}\">older data ❯</a>",
-        (start_offset + delta),
+        (start_offset + how_much_data),
         how_much_data
     )
     .as_str();
