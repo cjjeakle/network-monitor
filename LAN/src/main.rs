@@ -1,6 +1,3 @@
-#![feature(cursor_remaining)]
-#![feature(maybe_uninit_slice)]
-
 use actix_web::{
     http::header::ContentType, web, web::Query, App, HttpRequest, HttpResponse, HttpServer,
 };
@@ -83,7 +80,7 @@ impl IcmpEchoMessage {
         let mut sum: u32 = 0;
         // Take the sum of the message 16 bits at a time.
         let mut serialized = Cursor::new(self.serialize());
-        while !serialized.is_empty() {
+        while serialized.position() < serialized.get_ref().len() as u64 {
             sum += u32::from(serialized.read_u16::<BigEndian>().unwrap());
         }
         // So long as there is overflow, add it back into the lower 16 bits.
@@ -402,8 +399,9 @@ fn repeatedly_ping(hostname: String, ping_data: Arc<Mutex<PingData>>) {
             let recv_res = socket.recv_from(&mut recv_buf);
             response_recvd = match recv_res {
                 Ok((size, _origin_addr)) => {
-                    let response_buf = &unsafe { MaybeUninit::slice_assume_init_ref(&recv_buf) }
-                        [IP_HEADER_SIZE..size];
+                    let response_buf = &unsafe {
+                        std::slice::from_raw_parts(recv_buf.as_ptr() as *const u8, recv_buf.len())
+                    }[IP_HEADER_SIZE..size];
                     let response = IcmpEchoMessage::from(&response_buf);
                     let matching_response_found: bool = response.msg_type == 0
                         && response.code == 0
