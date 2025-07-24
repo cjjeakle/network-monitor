@@ -474,7 +474,7 @@ async fn index(req: HttpRequest, ping_data: web::Data<Arc<Mutex<PingData>>>) -> 
         position:relative;
     }
     .root {
-        width:1200px;
+        width:1400px;
     }
     table {
         width: 100%;
