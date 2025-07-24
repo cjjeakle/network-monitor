@@ -3,12 +3,11 @@ A utility to help monitor and assess network performance
 
 ## Build
 * [Install `rustup`](https://www.rust-lang.org/tools/install): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-* This project uses nightly features: `rustup install nightly`
 * Ensure you're up-to-date (`rustup update`)
 * Build the LAN-side application:
   ```
   cargo fmt --manifest-path=LAN/Cargo.toml && \
-  cargo +nightly build --manifest-path=LAN/Cargo.toml && \
+  cargo build --manifest-path=LAN/Cargo.toml && \
   sudo setcap cap_net_admin,cap_net_raw=eip LAN/target/debug/network-monitor
   ```
 * Test the LAN-side application:
@@ -38,7 +37,7 @@ A utility to help monitor and assess network performance
 * SSH into a LAN device to host the software
 * Configure the application by editing `LAN/config.rs`
 * Build the application
-  * `cargo +nightly build --release --manifest-path=LAN/Cargo.toml`
+  * `cargo build --release --manifest-path=LAN/Cargo.toml`
 * Copy the binary to the appropriate folder on the LAN device
   * `sudo mkdir -p /usr/bin/network-monitor/`
   * `sudo cp LAN/target/release/network-monitor /usr/bin/network-monitor/network-monitor`
@@ -64,7 +63,7 @@ A utility to help monitor and assess network performance
 Binary update script:
 ```
 git pull && \
-cargo +nightly build --release --manifest-path=LAN/Cargo.toml && \
+cargo build --release --manifest-path=LAN/Cargo.toml && \
 sudo systemctl stop network-monitor.service && \
 sudo cp LAN/target/release/network-monitor /usr/bin/network-monitor/ && \
 sudo setcap cap_net_admin,cap_net_raw=eip /usr/bin/network-monitor/network-monitor && \
